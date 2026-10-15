@@ -78,10 +78,9 @@ describe("Chase import — issuer, catalog seeding, anchored periods", () => {
     expect(byName.get("Airline Credit")).toEqual(
       expect.objectContaining({ amount: 100, period: "annual", anchorMonth: null }),
     );
-    // TravelBank: semiannual $25, patternless (manual/enrollment-based).
-    expect(byName.get("United TravelBank Credit")).toEqual(
-      expect.objectContaining({ amount: 25, period: "semiannual", matchPattern: "" }),
-    );
+    // No TravelBank row: that IHG benefit is a deposit to the holder's
+    // United TravelBank account, not a statement credit, so it is not seeded.
+    expect(byName.has("United TravelBank Credit")).toBe(false);
     expect(byName.get("Travel Credit")).toEqual(
       expect.objectContaining({ amount: 300, period: "annual" }),
     );

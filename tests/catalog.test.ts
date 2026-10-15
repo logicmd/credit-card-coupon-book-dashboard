@@ -93,18 +93,13 @@ describe("catalogFor — Chase products", () => {
     expect(catalogFor("World of Hyatt Credit Card")).toBeNull();
   });
 
-  test("IHG Premier gets the $100 airline credit plus the patternless TravelBank row", () => {
+  test("IHG Premier gets only the $100 airline credit", () => {
+    // The card's United TravelBank benefit is NOT a statement credit (Chase
+    // deposits cash into the holder's TravelBank account), so it is
+    // deliberately absent from the catalog.
     const defs = catalogFor("IHG One Rewards Premier Credit Card")!;
     expect(defs).toEqual([
       expect.objectContaining({ name: "Airline Credit", amount: 100, period: "annual" }),
-      // TravelBank is enrollment-based, not a statement credit: empty
-      // pattern so it never auto-matches a posting.
-      expect.objectContaining({
-        name: "United TravelBank Credit",
-        amount: 25,
-        period: "semiannual",
-        pattern: "",
-      }),
     ]);
   });
 

@@ -84,9 +84,6 @@ const HYATT_BUSINESS: CreditDef[] = [
 
 const IHG_PREMIER: CreditDef[] = [
   { name: "Airline Credit", amount: 100, period: "annual", pattern: "airline credit", note: "Posts when a single flight purchase of $250+ is made directly with the airline" },
-  // Not a statement credit: Chase deposits TravelBank cash after a one-time
-  // enrollment. Empty pattern = never auto-matched; record it manually.
-  { name: "United TravelBank Credit", amount: 25, period: "semiannual", pattern: "", note: "Deposited to your United TravelBank each half (Jan & Jul) after a one-time enrollment; deposited funds expire after about 6 months — record it manually when it lands" },
 ];
 
 const RITZ_CARLTON: CreditDef[] = [
