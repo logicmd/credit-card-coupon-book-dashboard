@@ -151,6 +151,39 @@ export function App() {
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["dashboard"] });
 
+  // Agent Markdown: a one-file snapshot of the dashboard state (same
+  // numbers as below) to paste to an AI assistant for discussion.
+  const [agentMd, setAgentMd] = useState<string | null>(null);
+  const [agentMdError, setAgentMdError] = useState<string | null>(null);
+  const [mdCopied, setMdCopied] = useState(false);
+  const agentMdFetch = useMutation({
+    mutationFn: () => api.getAgentMarkdown({}),
+    onSuccess: (res) => {
+      setAgentMd(res.markdown);
+      setMdCopied(false);
+      setAgentMdError(null);
+    },
+    onError: (e) => setAgentMdError(String(e)),
+  });
+  const copyAgentMd = async () => {
+    if (!agentMd) return;
+    try {
+      await navigator.clipboard.writeText(agentMd);
+      setMdCopied(true);
+    } catch {
+      setMdCopied(false);
+    }
+  };
+  const downloadAgentMd = () => {
+    if (!agentMd) return;
+    const url = URL.createObjectURL(new Blob([agentMd], { type: "text/markdown" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "credit-card-coupon-book.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
@@ -168,15 +201,26 @@ export function App() {
                 : "Loading your Amex credits…"}
             </p>
           </div>
-          <button
-            type="button"
-            aria-label="Refresh credits from Plaid"
-            disabled={refresh.isPending || refreshing}
-            onClick={() => refresh.mutate()}
-            className="shrink-0 rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              aria-label="Get agent markdown snapshot"
+              disabled={agentMdFetch.isPending}
+              onClick={() => agentMdFetch.mutate()}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+            >
+              {agentMdFetch.isPending ? "Preparing…" : "Agent Markdown"}
+            </button>
+            <button
+              type="button"
+              aria-label="Refresh credits from Plaid"
+              disabled={refresh.isPending || refreshing}
+              onClick={() => refresh.mutate()}
+              className="rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         </header>
 
         {refreshError && (
@@ -188,6 +232,49 @@ export function App() {
           <p className="mb-3 text-sm text-[var(--dim)]">
             Reading your Amex accounts from Plaid — this can take a minute. The list below updates when it lands.
           </p>
+        )}
+
+        {agentMdError && (
+          <p role="alert" className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--bad)]">
+            Couldn't prepare the markdown snapshot: {agentMdError}
+          </p>
+        )}
+        {agentMd && (
+          <section aria-label="Agent markdown snapshot" className="mb-5 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
+              <span className="text-base font-medium">Agent Markdown</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  aria-label="Copy agent markdown to clipboard"
+                  onClick={() => void copyAgentMd()}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  {mdCopied ? "Copied ✓" : "Copy"}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Download agent markdown as a file"
+                  onClick={downloadAgentMd}
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+                >
+                  Download .md
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close agent markdown"
+                  onClick={() => setAgentMd(null)}
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <p className="px-4 pt-3 text-sm text-[var(--dim)]">
+              One markdown file with everything on this page — paste it to your AI assistant to discuss what to use next.
+            </p>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-xs leading-relaxed">{agentMd}</pre>
+          </section>
         )}
 
         {dash.isPending && <p className="py-10 text-center text-sm text-[var(--dim)]">Loading…</p>}

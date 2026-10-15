@@ -4,6 +4,22 @@ Track every Amex and Chase statement credit across all your cards — and actual
 
 If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant, Chase Sapphire Preferred…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual — and some run on your cardmember anniversary year instead of the calendar year. They are easy to forget and issuers do not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
 
+## Supported cards
+
+The built-in catalog covers exactly these cards — their credit amounts, cycles, posting-name patterns, and anniversary anchors are encoded in the catalog and verified against them:
+
+- Amex Platinum
+- Amex Business Platinum
+- Amex Business Gold
+- Hilton Honors Aspire
+- Marriott Bonvoy Brilliant
+- Chase Sapphire Preferred
+- Chase World of Hyatt Business
+- Chase IHG One Rewards Premier
+- The Ritz-Carlton Card
+
+Any other card is **not yet supported**. In particular, Chase United cards (e.g. United Explorer) have **not** been verified and count as unsupported: an unsupported account can still show up via Plaid, but its credits are not tracked until a catalog entry exists for it.
+
 ## Features
 
 - **Real usage, not guesses** — usage is computed from the actual statement-credit postings on your accounts (e.g. `Platinum Lululemon Credit`, `AMEX Flight Credit`), never inferred from spending.

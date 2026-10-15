@@ -6,9 +6,10 @@
 // inferred from merchant spending. The credit catalog (amount + calendar
 // period per card product) is seeded on first import and fully editable.
 
-import { defineAction, z, type ActionsModule } from "@hatch/space-sdk";
+import { defineAction, z, type ActionsModule, type SpaceDb } from "@hatch/space-sdk";
 import { asc, desc, eq, isNull } from "drizzle-orm";
 import * as schema from "./schema";
+import { renderAgentMarkdown } from "./agentMarkdown";
 
 // ---------------------------------------------------------------------------
 // Catalog seed: current published Amex benefit terms per card product.
@@ -380,6 +381,8 @@ const creditView = z.object({
       postedDate: z.string(),
       name: z.string(),
       amount: z.number(),
+      /** Where this posting came from: imported from Plaid, or recorded manually. */
+      source: z.enum(["plaid", "manual"]),
     }),
   ),
 });
@@ -433,19 +436,25 @@ const dashboardResponse = z.object({
   }),
 });
 
+export type DashboardData = z.infer<typeof dashboardResponse>;
+
 const okResponse = z.object({ ok: z.literal(true) });
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
-export const Actions = {
-  getDashboard: defineAction({
-    request: z.object({}),
-    response: dashboardResponse,
-    async handler(ctx): Promise<z.infer<typeof dashboardResponse>> {
-      const db = ctx.db<typeof schema>();
-      const today = todayLA();
+/**
+ * The dashboard aggregation — the single place where current-period usage,
+ * remaining amounts, and totals are computed. The getDashboard action (JSON
+ * for the UI) and the getAgentMarkdown action (a markdown snapshot an AI
+ * assistant can discuss) both read from this, so the two views can never
+ * disagree. (Body indentation follows the action handler it came from.)
+ */
+async function computeDashboard(
+  db: SpaceDb<typeof schema>,
+): Promise<z.infer<typeof dashboardResponse>> {
+  const today = todayLA();
       const [accountRows, creditRows, postingRows, metaRows] = await Promise.all([
         db.select().from(schema.accounts).orderBy(asc(schema.accounts.id)),
         db.select().from(schema.credits).orderBy(asc(schema.credits.sortOrder)),
@@ -538,6 +547,7 @@ export const Actions = {
               postedDate: p.date,
               name: p.name,
               amount: p.amount,
+              source: p.source,
             })),
           };
         });
@@ -594,6 +604,32 @@ export const Actions = {
           expiring31: Math.round(expiring31 * 100) / 100,
           openCredits,
         },
+      };
+}
+
+export const Actions = {
+  getDashboard: defineAction({
+    request: z.object({}),
+    response: dashboardResponse,
+    async handler(ctx): Promise<z.infer<typeof dashboardResponse>> {
+      return computeDashboard(ctx.db<typeof schema>());
+    },
+  }),
+
+  // Agent-friendly markdown snapshot of the very same aggregated state the
+  // dashboard displays (via computeDashboard — no second set of math). The
+  // user pastes it to their AI assistant, which can then discuss what to
+  // use next with full context: amounts, period windows, usage rules, and
+  // where each number came from.
+  getAgentMarkdown: defineAction({
+    request: z.object({}),
+    response: z.object({ markdown: z.string(), generatedAt: z.string() }),
+    async handler(ctx) {
+      const data = await computeDashboard(ctx.db<typeof schema>());
+      const generatedAt = new Date();
+      return {
+        markdown: renderAgentMarkdown(data, generatedAt),
+        generatedAt: generatedAt.toISOString(),
       };
     },
   }),

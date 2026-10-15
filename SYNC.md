@@ -53,5 +53,10 @@ just faster — repo, test, push, deploy.
   surface their next-period renewal date.
 - Login labels stored in `meta`, configurable in the app; daily incremental
   refresh (trailing 30 days) with bootstrap / gap-fill windows.
+- Agent Markdown export: one action renders the same aggregated dashboard
+  state as a compact markdown file (headline totals, credits ordered by
+  nearest period end, catalog usage rules, Plaid-vs-manual posting
+  provenance) for pasting to an AI assistant; the header offers copy and
+  .md download.
 - Unit tests with fictional fixtures covering the period math, catalog,
   matching, import, and dashboard logic.
