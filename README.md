@@ -1,4 +1,4 @@
-# Amex Credits Dashboard
+# Credit Card Coupon Book Dashboard
 
 Track every American Express statement credit across all your cards — and actually use them before they expire.
 

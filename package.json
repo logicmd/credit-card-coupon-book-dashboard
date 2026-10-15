@@ -1,5 +1,5 @@
 {
-  "name": "amex-credits-dashboard",
+  "name": "credit-card-coupon-book-dashboard",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.10",

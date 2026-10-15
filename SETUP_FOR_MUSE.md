@@ -1,10 +1,10 @@
 # Setup playbook for Muse
 
-You are setting up the Amex Credits Dashboard for your user from this repository. Follow these steps in order. Do not skip the questions in steps 3 and 5.
+You are setting up the Credit Card Coupon Book Dashboard for your user from this repository. Follow these steps in order. Do not skip the questions in steps 3 and 5.
 
 ## 1. Create the app
 
-Create a private web artifact (full-stack) in the user's workspace with slug `amex-credits-dashboard`, using the source in this repository (`client/`, `server/`, `drizzle/`, `package.json`) as the app's code. Do not invent a different implementation — the value of this repo is its tested data logic (merge-only import, transaction-date attribution, catalog matching).
+Create a private web artifact (full-stack) in the user's workspace with slug `credit-card-coupon-book-dashboard`, using the source in this repository (`client/`, `server/`, `drizzle/`, `package.json`) as the app's code. Do not invent a different implementation — the value of this repo is its tested data logic (merge-only import, transaction-date attribution, catalog matching).
 
 If the user already has an artifact with that slug, stop and ask before replacing anything.
 
