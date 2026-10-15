@@ -47,9 +47,23 @@ describe("exclusion preference — defaults", () => {
     const dash: any = await Actions.getDashboard.handler(ctx, {});
     expect(dash.excludedPatterns).toEqual([...DEFAULT_EXCLUDED_PATTERNS]);
     expect(dash.credits.map((c: any) => c.name)).not.toContain("ChatGPT Business Credit");
+    // Hidden by name: the stored ChatGPT row PLUS the card's other two
+    // default-hidden families (Adobe, Indeed), which have no stored rows
+    // at all — compute-time synthesis is what lets the preference name
+    // them here (previously only stored rows could be listed).
     expect(dash.hiddenCredits).toEqual([
       expect.objectContaining({
+        name: "Adobe Credit",
+        accountName: "Business Platinum Card®",
+        mask: "3333",
+      }),
+      expect.objectContaining({
         name: "ChatGPT Business Credit",
+        accountName: "Business Platinum Card®",
+        mask: "3333",
+      }),
+      expect.objectContaining({
+        name: "Indeed Credit",
         accountName: "Business Platinum Card®",
         mask: "3333",
       }),
@@ -90,7 +104,13 @@ describe("exclusion preference — changes via the actions", () => {
 
     const dash: any = await Actions.getDashboard.handler(ctx, {});
     expect(dash.credits.map((c: any) => c.name)).toContain("ChatGPT Business Credit");
-    expect(dash.hiddenCredits).toEqual([]);
+    // Only "chatgpt" was removed: the card's other default-hidden
+    // families (Adobe, Indeed) stay hidden — they are synthesized
+    // instances, so they are named here despite having no stored rows.
+    expect(dash.hiddenCredits.map((h: any) => h.name)).toEqual([
+      "Adobe Credit",
+      "Indeed Credit",
+    ]);
     // Now it counts: $710 of catalog credits + the $300 ChatGPT credit.
     expect(dash.totals.remainingNow).toBe(1010);
 

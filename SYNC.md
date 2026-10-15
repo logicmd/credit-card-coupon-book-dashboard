@@ -55,6 +55,15 @@ just faster — repo, test, push, deploy.
   settings UI; pinned credits; grouped totals across cards and logins;
   Cards section grouped by issuer, then login; used-up credits surface
   their next-period renewal date.
+- Compute-time catalog synthesis: credit instances are materialized at
+  read time from the full catalog × the stored accounts and merged with
+  stored credit rows (keyed by account + credit name; a stored row
+  wins). A credit therefore needs no stored row to be shown, hidden, or
+  un-hidden — the default-hidden families (ChatGPT Business, Indeed,
+  Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+) are named in
+  "Hidden by preference" and resurface when their pattern is removed,
+  even on deployments whose accounts were imported before those
+  families existed. Synthesis never writes to the database.
 - Login labels stored in `meta`, configurable in the app; daily incremental
   refresh (trailing 30 days) with bootstrap / gap-fill windows.
 - Agent Markdown export: one action renders the same aggregated dashboard

@@ -94,13 +94,59 @@ const RITZ_CARLTON: CreditDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Non-seeded catalog credits: the benefit families the dashboard hides by
+// default (ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
+// entertainment, Walmart+). These are real published benefits of the
+// products below, but they are deliberately NOT part of the seeded catalogs
+// above: import never writes rows for them and postings never auto-match
+// them. Instead, computeDashboard synthesizes dashboard instances for them
+// at read time (merged with stored rows — a stored row for the same
+// account + name wins). That is what lets the exclusion preference name
+// them in "Hidden by preference" and un-hide them on ANY deployment —
+// including long-running ones whose accounts were imported before these
+// families existed and therefore never materialized stored rows.
+// ---------------------------------------------------------------------------
+
+const BIZ_PLAT_NON_SEEDED: CreditDef[] = [
+  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately" },
+  { name: "Indeed Credit", amount: 200, period: "annual", pattern: "indeed", note: "U.S. purchases with Indeed" },
+  { name: "Adobe Credit", amount: 150, period: "annual", pattern: "adobe", note: "Adobe Creative Cloud / Acrobat purchases" },
+];
+
+const BIZ_GOLD_NON_SEEDED: CreditDef[] = [
+  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately" },
+];
+
+const PERSONAL_PLAT_NON_SEEDED: CreditDef[] = [
+  { name: "CLEAR+ Credit", amount: 209, period: "annual", pattern: "clear", note: "CLEAR+ membership charges" },
+  { name: "Equinox Credit", amount: 300, period: "annual", pattern: "equinox", note: "Equinox club memberships and the Equinox+ app; enrollment required" },
+  { name: "Digital Entertainment Credit", amount: 25, period: "monthly", pattern: "entertainment", note: "Monthly credit across the eligible streaming services; enrollment required" },
+  { name: "Walmart+ Credit", amount: 12.95, period: "monthly", pattern: "walmart", note: "Monthly Walmart+ membership fee; enrollment required" },
+];
+
+/**
+ * The non-seeded (synthesis-only) catalog credits for a card product,
+ * using the same product detection order as catalogFor. Returns [] for
+ * products that carry none of the default-hidden families.
+ */
+export function nonSeededDefsFor(accountName: string): CreditDef[] {
+  const n = accountName.toLowerCase();
+  if (n.includes("business platinum")) return BIZ_PLAT_NON_SEEDED;
+  if (n.includes("business gold")) return BIZ_GOLD_NON_SEEDED;
+  if (n.includes("platinum")) return PERSONAL_PLAT_NON_SEEDED;
+  return [];
+}
+
+// ---------------------------------------------------------------------------
 // Display preferences:
 // - Hidden credits: a stored user preference (meta key `excludedCredits`,
 //   a JSON list of lowercase name patterns). A credit whose name contains
 //   any pattern (case-insensitive substring) is filtered out of the
-//   dashboard list and out of every total. Its rows stay in the DB (their
-//   postings stay assigned, so nothing leaks into Unassigned), and
-//   un-hiding restores it exactly. When the preference has never been set,
+//   dashboard list and out of every total. Stored rows stay in the DB
+//   (their postings stay assigned, so nothing leaks into Unassigned);
+//   credits with no stored row are synthesized at read time (see
+//   computeDashboard), so un-hiding restores either kind exactly. When
+//   the preference has never been set,
 //   DEFAULT_EXCLUDED_PATTERNS applies — the built-in list covering
 //   ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
 //   entertainment, and Walmart+.
@@ -586,12 +632,65 @@ async function computeDashboard(
         arr.push(p);
         postingsByCredit.set(p.creditId, arr);
       }
+
+      // Compute-time synthesis of catalog credit instances (NO database
+      // writes): for every account in the DB, each credit in the product's
+      // full catalog — the seeded defs from catalogFor PLUS the non-seeded
+      // families from nonSeededDefsFor — becomes an instance. Instances
+      // are keyed by (accountId, credit name): a stored row with that key
+      // wins and supplies the persisted state (edited amount / period /
+      // active flag, and its postings via postingsByCredit); only defs
+      // with no stored row are synthesized, with the catalog amount and
+      // cycle and no postings (0 used). This is what makes credits that
+      // were never materialized as rows — the default-hidden families on
+      // long-running deployments — listable by the exclusion preference
+      // below and surfacable again by un-hiding, with no migration.
+      // Synthesized instances carry deterministic negative ids so they
+      // can never collide with a real row id (postings reference real ids).
+      const storedNameByAccount = new Map<number, Set<string>>();
+      for (const c of creditRows) {
+        const names = storedNameByAccount.get(c.accountId) ?? new Set<string>();
+        names.add(c.name.trim().toLowerCase());
+        storedNameByAccount.set(c.accountId, names);
+      }
+      const synthesizedRows: (typeof creditRows)[number][] = [];
+      let synthId = 0;
+      for (const acct of accountRows) {
+        const defs = [
+          ...(catalogFor(acct.name) ?? []),
+          ...nonSeededDefsFor(acct.name),
+        ];
+        if (defs.length === 0) continue;
+        const have = storedNameByAccount.get(acct.id) ?? new Set<string>();
+        defs.forEach((d, i) => {
+          const key = d.name.trim().toLowerCase();
+          if (have.has(key)) return;
+          have.add(key);
+          synthId -= 1;
+          synthesizedRows.push({
+            id: synthId,
+            accountId: acct.id,
+            name: d.name,
+            amount: d.amount,
+            period: d.period,
+            anchorMonth: d.anchorMonth ?? null,
+            anchorDay: d.anchorDay ?? null,
+            matchPattern: d.pattern,
+            enrolled: 1,
+            active: 1,
+            note: d.note ?? "",
+            sortOrder: 10000 + i,
+          });
+        });
+      }
+      const effectiveCreditRows = [...creditRows, ...synthesizedRows];
+
       let remainingNow = 0;
       let expiring14 = 0;
       let expiring31 = 0;
       let openCredits = 0;
 
-      const credits = creditRows
+      const credits = effectiveCreditRows
         .filter((c) => {
           const acct = accountById.get(c.accountId);
           return acct && acct.ignored === 0 && !isExcludedName(c.name, excludedPatterns);
@@ -683,14 +782,17 @@ async function computeDashboard(
         });
 
       const creditCountByAccount = new Map<number, number>();
-      for (const c of creditRows) {
+      for (const c of effectiveCreditRows) {
         creditCountByAccount.set(c.accountId, (creditCountByAccount.get(c.accountId) ?? 0) + 1);
       }
 
       // The credits the preference hides: surfaced by name (never tallied)
       // so the Agent Markdown can tell an assistant they exist and can be
-      // re-enabled via chat.
-      const hiddenCredits = creditRows
+      // re-enabled via chat. Drawn from the SAME effective instances as
+      // the visible list (stored rows + synthesized catalog instances),
+      // so a hidden credit with no stored row is still named — and
+      // removing its pattern below surfaces the very same instance.
+      const hiddenCredits = effectiveCreditRows
         .filter((c) => {
           const acct = accountById.get(c.accountId);
           return acct && acct.ignored === 0 && isExcludedName(c.name, excludedPatterns);
