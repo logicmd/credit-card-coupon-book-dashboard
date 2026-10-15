@@ -15,7 +15,7 @@ import * as schema from "./schema";
 // Every row is a default the user can edit (amount, period, enrolled, active).
 // ---------------------------------------------------------------------------
 
-type Period = "monthly" | "quarterly" | "semiannual" | "annual";
+export type Period = "monthly" | "quarterly" | "semiannual" | "annual";
 type CreditDef = {
   name: string;
   amount: number;
@@ -68,7 +68,7 @@ const BIZ_GOLD: CreditDef[] = [
 //   "stop tracking" toggled them off.
 // ---------------------------------------------------------------------------
 
-const EXCLUDED_NAME_PATTERNS = [
+export const EXCLUDED_NAME_PATTERNS = [
   "chatgpt",
   "indeed",
   "adobe",
@@ -78,12 +78,12 @@ const EXCLUDED_NAME_PATTERNS = [
   "walmart",
 ];
 
-function isExcludedName(name: string): boolean {
+export function isExcludedName(name: string): boolean {
   const n = name.toLowerCase();
   return EXCLUDED_NAME_PATTERNS.some((p) => n.includes(p));
 }
 
-function isPinnedCredit(name: string): boolean {
+export function isPinnedCredit(name: string): boolean {
   const n = name.toLowerCase();
   return n.includes("flexible business") || n.includes("wireless");
 }
@@ -99,9 +99,9 @@ function isPinnedCredit(name: string): boolean {
 // a label and is shown verbatim.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_OWNER_LABELS: [string, string] = ["Login 1", "Login 2"];
+export const DEFAULT_OWNER_LABELS: [string, string] = ["Login 1", "Login 2"];
 
-function ownerLabelFor(
+export function ownerLabelFor(
   ownerKey: string | null,
   labels: [string, string],
 ): string | null {
@@ -111,13 +111,45 @@ function ownerLabelFor(
   return ownerKey;
 }
 
-function catalogFor(accountName: string): CreditDef[] | null {  const n = accountName.toLowerCase();
+export function catalogFor(accountName: string): CreditDef[] | null {  const n = accountName.toLowerCase();
   if (n.includes("business platinum")) return BIZ_PLAT;
   if (n.includes("aspire")) return ASPIRE;
   if (n.includes("brilliant")) return BRILLIANT;
   if (n.includes("business gold")) return BIZ_GOLD;
   if (n.includes("platinum")) return PERSONAL_PLAT; // incl. co-branded Platinum variants
   return null;
+}
+
+/**
+ * Auto-mapping rule for imported postings: the first of the account's
+ * credits whose non-empty match pattern is a case-insensitive substring of
+ * the posting name wins. Returns undefined when nothing matches (the
+ * posting stays unassigned for manual review).
+ */
+export function matchCreditForPosting<T extends { matchPattern: string }>(
+  credits: readonly T[],
+  postingName: string,
+): T | undefined {
+  const lower = postingName.toLowerCase();
+  return credits.find(
+    (c) => c.matchPattern !== "" && lower.includes(c.matchPattern.toLowerCase()),
+  );
+}
+
+/**
+ * Duplicate-account detection key: two Plaid records with the same card
+ * name, the same non-zero balance, and the same credit limit are two views
+ * of one underlying account (e.g. the primary card and a supplementary
+ * card record seen from both logins). Returns null when the balance is
+ * missing or zero — such records are never auto-flagged as duplicates.
+ */
+export function accountDuplicateKey(
+  name: string,
+  balance: number | null | undefined,
+  creditLimit: number | null | undefined,
+): string | null {
+  if (balance == null || balance === 0) return null;
+  return `${name}|${balance}|${creditLimit ?? ""}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,9 +185,9 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-type Bounds = { start: string; end: string; key: string; label: string };
+export type Bounds = { start: string; end: string; key: string; label: string };
 
-function periodBounds(period: Period, dateStr: string): Bounds {
+export function periodBounds(period: Period, dateStr: string): Bounds {
   const { y, m } = parseDate(dateStr);
   if (period === "monthly") {
     return {
@@ -190,7 +222,7 @@ function periodBounds(period: Period, dateStr: string): Bounds {
   return { start: fmt(y, 1, 1), end: fmt(y, 12, 31), key: `${y}`, label: `${y}` };
 }
 
-function daysBetween(a: string, b: string): number {
+export function daysBetween(a: string, b: string): number {
   const pa = parseDate(a);
   const pb = parseDate(b);
   const ua = Date.UTC(pa.y, pa.m - 1, pa.d);
@@ -198,14 +230,14 @@ function daysBetween(a: string, b: string): number {
   return Math.round((ub - ua) / 86400000);
 }
 
-function addDays(dateStr: string, delta: number): string {
+export function addDays(dateStr: string, delta: number): string {
   const { y, m, d } = parseDate(dateStr);
   const t = new Date(Date.UTC(y, m - 1, d) + delta * 86400000);
   return fmt(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
 }
 
 /** LA calendar date (YYYY-MM-DD) of an ISO timestamp, or null if unparseable. */
-function laDateOf(iso: string): string | null {
+export function laDateOf(iso: string): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return new Intl.DateTimeFormat("en-CA", {
@@ -511,9 +543,8 @@ export const Actions = {
       // user can un-ignore them in the Accounts section.
       const seenKey = new Map<string, number>();
       for (const a of existingAccounts) {
-        if (a.balance != null && a.balance !== 0) {
-          seenKey.set(`${a.name}|${a.balance}|${a.creditLimit ?? ""}`, a.id);
-        }
+        const key = accountDuplicateKey(a.name, a.balance, a.creditLimit);
+        if (key != null) seenKey.set(key, a.id);
       }
 
       let accountsAdded = 0;
@@ -534,10 +565,10 @@ export const Actions = {
           continue;
         }
         let ignored = a.ignored ? 1 : 0;
-        if (!ignored && a.balance != null && a.balance !== 0) {
-          const key = `${a.name}|${a.balance}|${a.creditLimit ?? ""}`;
-          if (seenKey.has(key)) ignored = 1;
-          else seenKey.set(key, -1);
+        const dupKey = accountDuplicateKey(a.name, a.balance, a.creditLimit);
+        if (!ignored && dupKey != null) {
+          if (seenKey.has(dupKey)) ignored = 1;
+          else seenKey.set(dupKey, -1);
         }
         const inserted = await db
           .insert(schema.accounts)
@@ -566,9 +597,7 @@ export const Actions = {
           createdAt: new Date(),
         };
         byPlaidId.set(a.plaidAccountId, fresh);
-        if (a.balance != null && a.balance !== 0) {
-          seenKey.set(`${a.name}|${a.balance}|${a.creditLimit ?? ""}`, row.id);
-        }
+        if (dupKey != null) seenKey.set(dupKey, row.id);
       }
 
       // Seed catalog credits for any account that has none yet.
@@ -619,10 +648,7 @@ export const Actions = {
           postingsSkipped++;
           continue;
         }
-        const lower = p.name.toLowerCase();
-        const match = (creditsByAccount.get(acct.id) ?? []).find(
-          (c) => c.matchPattern !== "" && lower.includes(c.matchPattern.toLowerCase()),
-        );
+        const match = matchCreditForPosting(creditsByAccount.get(acct.id) ?? [], p.name);
         await db.insert(schema.postings).values({
           txnId: p.txnId,
           accountId: acct.id,

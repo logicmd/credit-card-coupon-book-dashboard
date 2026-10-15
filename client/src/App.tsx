@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SafeAreaTopScrim } from "@hatch/space-sdk/client";
 import { api, type ApiResponse } from "./api";
+import { groupCredits, type CreditGroup } from "./grouping";
 
 type Dashboard = ApiResponse<typeof api, "getDashboard">;
 type Credit = Dashboard["credits"][number];
@@ -242,75 +243,6 @@ function sortedActionable(credits: Credit[]): Credit[] {
     });
 }
 
-// Credits of the same type on different cards (same name, same period, same
-// current period window) collapse into one group with combined totals; the
-// per-card rows stay available inside the expanded group.
-type CreditGroup = {
-  key: string;
-  name: string;
-  /** Distinct logins this combined entry spans (both logins), shown together. */
-  owners: string[];
-  period: Period;
-  periodLabel: string;
-  periodEnd: string;
-  daysLeft: number;
-  amount: number;
-  used: number;
-  remaining: number;
-  notEnrolled: number;
-  members: Credit[];
-};
-
-function groupCredits(credits: Credit[]): CreditGroup[] {
-  const byKey = new Map<string, CreditGroup>();
-  for (const c of credits) {
-    // One combined entry per credit type across BOTH logins (the totals rows
-    // must not split the two logins apart). Which login each card belongs to
-    // shows inside the expanded entry, on the per-card rows.
-    const key = `${c.name.trim().toLowerCase()}|${c.period}|${c.periodLabel}`;
-    const g = byKey.get(key);
-    if (g) {
-      g.members.push(c);
-      g.amount += c.amount;
-      g.used += c.currentUsed;
-      g.remaining += c.currentRemaining;
-      g.daysLeft = Math.min(g.daysLeft, c.daysLeft);
-      if (c.owner && !g.owners.includes(c.owner)) g.owners.push(c.owner);
-      if (!c.enrolled) g.notEnrolled += 1;
-    } else {
-      byKey.set(key, {
-        key,
-        name: c.name,
-        owners: c.owner ? [c.owner] : [],
-        period: c.period,
-        periodLabel: c.periodLabel,
-        periodEnd: c.periodEnd,
-        daysLeft: c.daysLeft,
-        amount: c.amount,
-        used: c.currentUsed,
-        remaining: c.currentRemaining,
-        notEnrolled: c.enrolled ? 0 : 1,
-        members: [c],
-      });
-    }
-  }
-  const groups = [...byKey.values()];
-  for (const g of groups) {
-    g.amount = Math.round(g.amount * 100) / 100;
-    g.used = Math.round(g.used * 100) / 100;
-    g.remaining = Math.round(g.remaining * 100) / 100;
-    g.members.sort((a, b) => b.currentRemaining - a.currentRemaining);
-  }
-  groups.sort((a, b) => {
-    const aDone = a.remaining <= 0 ? 1 : 0;
-    const bDone = b.remaining <= 0 ? 1 : 0;
-    if (aDone !== bDone) return aDone - bDone;
-    if (a.daysLeft !== b.daysLeft) return a.daysLeft - b.daysLeft;
-    return b.remaining - a.remaining;
-  });
-  return groups;
-}
-
 function ActionList({ data, onChanged }: { data: Dashboard; onChanged: () => void }) {
   const [showUsedUp, setShowUsedUp] = useState(false);
   const all = groupCredits(sortedActionable(data.credits));
@@ -492,7 +424,7 @@ function GroupRow({
   allCredits,
   onChanged,
 }: {
-  group: CreditGroup;
+  group: CreditGroup<Credit>;
   allCredits: Credit[];
   onChanged: () => void;
 }) {

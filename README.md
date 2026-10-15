@@ -41,6 +41,21 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 - `server/src/schema.ts` — accounts, credits, postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`).
 - The built-in catalog encodes public Amex program rules (amounts, periods, posting-name patterns) for Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Uber One credits, the discontinued Brilliant property credit, and Saks.
 
+## Tests
+
+```bash
+bun test
+```
+
+The suite (in `tests/`) covers the core logic: calendar-period windows, the
+benefit catalog and exclusion list, posting→credit matching, duplicate-account
+detection, the merge-only import (re-importing a snapshot adds nothing),
+dashboard totals across cards, and the client-side grouping of same-type
+credits. DB-backed tests run the real action handlers against an in-memory
+SQLite database with the production migrations applied. All fixtures are
+fictional — invented people, fake card masks, and made-up amounts. See
+[tests/README.md](tests/README.md) for details and known coverage gaps.
+
 ## Privacy
 
 Your financial data never leaves your own environment: accounts and postings live in the app's local database in *your* workspace. This repo contains no one's data — the database starts empty and bootstraps from your own Plaid connection.
