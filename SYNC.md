@@ -1,12 +1,13 @@
-# Sync with the live deployment
+# This repo is the source of truth
 
-This repository is the **open-source mirror** of a live, private deployment of
-the Credit Card Coupon Book Dashboard. The two codebases are the same app and
-must keep the **same feature set**; they differ only in data.
+This repository is the **single source of truth** for the Credit Card Coupon
+Book Dashboard's code. The live, private deployment (which tracks its owner's
+real cards) is a **deployment target**: it runs this code against its own
+database. Nobody edits the live app directly.
 
 ## Where personal data lives
 
-Only in the live deployment's own database — never in code, on either side:
+Only in the live deployment's own database — never in code:
 
 - Accounts, postings, balances: rows in the live app's database, imported
   from its owner's own Plaid connection.
@@ -15,27 +16,29 @@ Only in the live deployment's own database — never in code, on either side:
   Code and this repo only ever contain the neutral defaults "Login 1" /
   "Login 2".
 
-Nothing personal flows into this repo. What flows in is code and **public
-program facts** (card benefit amounts, cycles, posting names) — the same
-facts anyone can read on the issuers' pages. Tests here use fictional
-fixtures only.
+Tests use fictional fixtures only. What legitimately lives in the code —
+here and therefore in production — is **public program facts**: card benefit
+amounts, cycles, and posting names, the same facts anyone can read on the
+issuers' pages.
 
-## How changes flow
+## How changes flow (one direction only)
 
-1. **Live → repo.** A fix or feature lands in the live app first (it is the
-   one tracking real cards). It is then ported here, sanitized: real account
-   identifiers, names, and amounts are replaced with fictional ones, and the
-   behavior is pinned down with unit tests (`bun test` must pass).
-2. **Repo → live.** An improvement made here (a refactor, a new catalog
-   entry, a display tweak) is applied to the live app through its editor,
-   against the live database, which is never reset or re-seeded — the
+1. **Edit here.** Every feature, fix, catalog entry, and display tweak is
+   made in this repo first. If a change only makes sense with the live
+   owner's cards, generalize it (a catalog entry, a config value, an anchor
+   date) instead of hardcoding anything personal.
+2. **Verify locally.** `bun test` and the typecheck must pass before
+   anything moves. New behavior gets new tests with fictional fixtures.
+3. **Push to GitHub.** The commit on `main` is the release.
+4. **Deploy to live.** The live app is updated to the repo's new code state
+   through its editor. Its database is never reset or re-seeded — the
    merge-only import guarantees existing data survives code changes.
 
-When porting, port the *behavior*, not the data: if a change only makes
-sense with the live owner's cards, generalize it (a catalog entry, a config
-value, an anchor date) before bringing it here.
+There is no manual back-porting step anymore: because the live app is never
+edited directly, the two sides cannot drift. A hotfix follows the same path,
+just faster — repo, test, push, deploy.
 
-## Shared feature set (keep both sides in step)
+## Feature set (what "this code" currently includes)
 
 - Merge-only Plaid import: postings deduped by transaction id, never
   deleted; re-import may correct a posting's transaction date in place.
