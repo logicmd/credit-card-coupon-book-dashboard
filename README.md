@@ -27,7 +27,7 @@ Any other card is **not yet supported**. In particular, Chase United cards (e.g.
 - **Anniversary-year cycles** — credits whose program runs on your cardmember year (e.g. Chase Sapphire Preferred's hotel credit, World of Hyatt Business) carry an anchor date and run anchor-to-anchor (May 1 – Apr 30) instead of Jan 1 – Dec 31.
 - **Merged view** — the same credit on six cards shows as one row with the combined total; expand it to see each card.
 - **Two logins supported** — households often have cards spread across two Amex logins (e.g. you and your spouse). Each account is tagged with its login; labels are configurable ("Login 1" / "Login 2" by default). Summary totals are always combined.
-- **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about (a built-in exclusion list, editable in code) never appear.
+- **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about never appear: an exclusion list (built-in defaults, then your own stored preference) hides them, and you change it just by asking your Muse in chat — there is no settings page.
 - **Incremental refresh** — daily refresh pulls only the last 30 days from Plaid and merges by transaction ID. Nothing already stored is ever deleted; a coverage-start marker shows how far back your data goes. If coverage is incomplete, refresh bootstraps from Jan 1 of the current year first.
 
 ## Run it in Muse (recommended)

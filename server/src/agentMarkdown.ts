@@ -112,6 +112,33 @@ export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): str
     );
   }
   out.push("");
+  // Credits hidden by the display-exclusion preference never appear above
+  // and never count in the totals — but an assistant managing the user's
+  // credits has to know they exist (and that it can re-enable them via the
+  // preference actions) instead of concluding the cards lack them.
+  if (data.excludedPatterns.length > 0) {
+    out.push("## Hidden by preference");
+    out.push("");
+    out.push(
+      "These credits are hidden by your display preference and are not counted " +
+        "in any total above. There is no settings page for this — ask your " +
+        "assistant in chat to show or hide a credit and it will update the preference.",
+    );
+    out.push("");
+    if (data.hiddenCredits.length > 0) {
+      for (const h of data.hiddenCredits) {
+        const parts: string[] = [];
+        if (h.owner) parts.push(h.owner);
+        parts.push(h.accountName);
+        const card = h.mask ? `${parts.join(" · ")} ··${h.mask}` : parts.join(" · ");
+        out.push(`- ${h.name} — ${card}`);
+      }
+    } else {
+      out.push("- None of your stored credits currently match the preference.");
+    }
+    out.push(`- Exclusion entries in force: ${data.excludedPatterns.join(", ")}`);
+    out.push("");
+  }
   out.push("## Credits — most urgent first");
   out.push("");
   if (open.length === 0) {

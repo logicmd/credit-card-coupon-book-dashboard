@@ -31,7 +31,15 @@ Open the app and trigger `refreshCredits`. With an empty database it performs a 
 
 ## 5. Ask: which credits to hide?
 
-The built-in exclusion list already hides credits most people cannot or do not want to use (ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Uber One, the discontinued Brilliant property credit, Saks). Ask the user if they want any of those shown, or anything else hidden, and adjust `EXCLUDED_NAME_PATTERNS` in `server/src/actions.ts` accordingly, then rebuild the artifact.
+Some credits are hidden by default — the built-in list covers ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, and Walmart+. Hidden credits stay in the database (their postings still count as assigned) but never appear on the dashboard and never count in any total.
+
+Hiding is a **stored preference, not a code setting**: it lives in the app's meta table under the key `excludedCredits` (a JSON list of lowercase name patterns). There is deliberately no settings UI on the web page — the user changes it by asking you in chat:
+
+- Read the current list with the `getPreferences` action. (When nothing has ever been stored, it returns the built-in defaults.)
+- Change it with the `setExcludedCredits` action, passing the **complete** new list — it replaces the stored one, it does not append. To show a hidden credit again, resend the list without its entry; to hide another credit, add its name. An empty list shows everything.
+- Entries are matched as case-insensitive substrings of credit names and are validated against the catalog and the credits stored in the database — an unknown name is rejected, so if a call fails, compare the spelling against `getDashboard` or the catalog before retrying.
+
+The change takes effect immediately — in the dashboard, and in the Agent Markdown export, which names the hidden credits under "Hidden by preference" so you always know they exist. Ask the user whether they want any of the default-hidden credits shown, or anything else hidden, and apply their answer with the action. Never edit source code to change the exclusion list.
 
 ## 6. Set the daily refresh (recommended)
 

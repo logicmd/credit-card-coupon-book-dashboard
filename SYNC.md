@@ -48,15 +48,20 @@ just faster — repo, test, push, deploy.
   Aspire / Marriott Brilliant) and Chase (Sapphire Preferred, World of
   Hyatt Business, IHG One Rewards Premier, Ritz-Carlton), including
   anniversary-anchored annual cycles.
-- Display exclusion list and pinned credits; grouped totals across cards
-  and logins; Cards section grouped by issuer, then login; used-up credits
-  surface their next-period renewal date.
+- Display exclusion list as a stored database preference (meta
+  `excludedCredits`, a JSON list of name patterns; the built-in list
+  applies until a preference is stored), read and changed only through
+  the `getPreferences` / `setExcludedCredits` actions from chat — no
+  settings UI; pinned credits; grouped totals across cards and logins;
+  Cards section grouped by issuer, then login; used-up credits surface
+  their next-period renewal date.
 - Login labels stored in `meta`, configurable in the app; daily incremental
   refresh (trailing 30 days) with bootstrap / gap-fill windows.
 - Agent Markdown export: one action renders the same aggregated dashboard
   state as a compact markdown file (headline totals, credits ordered by
   nearest period end, catalog usage rules, Plaid-vs-manual posting
-  provenance) for pasting to an AI assistant; the header offers copy and
-  .md download.
+  provenance, plus a "Hidden by preference" section naming the credits
+  the exclusion preference hides) for pasting to an AI assistant; the
+  header offers copy and .md download.
 - Unit tests with fictional fixtures covering the period math, catalog,
   matching, import, and dashboard logic.

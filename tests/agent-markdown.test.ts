@@ -154,6 +154,10 @@ function sampleDashboard(): DashboardData {
   return {
     lastImportAt: "2026-10-15T08:00:00.000Z",
     ownerLabels: ["Alex", "Sam"],
+    excludedPatterns: ["chatgpt", "indeed", "adobe", "clear", "equinox", "entertainment", "walmart"],
+    hiddenCredits: [
+      { name: "ChatGPT Business Credit", accountName: "Business Platinum Card®", mask: "3333", owner: "Alex" },
+    ],
     dataCoverageStart: "2026-01-01",
     lastRefreshWindowStart: "2026-09-16",
     today: "2026-10-15",
@@ -216,6 +220,22 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain('2026-03-05 "Manual entry" $100 (manual entry)');
     expect(md).toContain('2026-09-30 "Platinum Hotel Credit" $300 (Plaid) · posted 2026-10-02');
     expect(md).toContain("- Postings this period: none yet");
+  });
+
+  test("hidden-by-preference section names the excluded credits and the entries in force", () => {
+    const md = renderAgentMarkdown(sampleDashboard(), GENERATED_AT);
+    expect(md).toContain("## Hidden by preference");
+    expect(md).toContain("not counted in any total above");
+    // The hidden credit is named with its card so an assistant can manage it.
+    expect(md).toContain("- ChatGPT Business Credit — Alex · Business Platinum Card® ··3333");
+    expect(md).toContain(
+      "Exclusion entries in force: chatgpt, indeed, adobe, clear, equinox, entertainment, walmart",
+    );
+    // It is listed as hidden only — never rendered as a tracked credit block.
+    expect(md).not.toContain("### ChatGPT Business Credit");
+    // The section sits between the summary and the credit list.
+    expect(md.indexOf("## Summary")).toBeLessThan(md.indexOf("## Hidden by preference"));
+    expect(md.indexOf("## Hidden by preference")).toBeLessThan(md.indexOf("## Credits"));
   });
 
   test("amounts expiring at the same nearest boundary are summed", () => {

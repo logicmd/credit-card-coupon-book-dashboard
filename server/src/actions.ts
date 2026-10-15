@@ -95,17 +95,29 @@ const RITZ_CARLTON: CreditDef[] = [
 
 // ---------------------------------------------------------------------------
 // Display preferences:
-// - Never display: ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox,
-//   digital entertainment, Walmart+. Existing rows for these stay in the DB
-//   (their postings stay assigned, so nothing leaks into Unassigned), but
-//   getDashboard filters them out of the list and out of every total.
+// - Hidden credits: a stored user preference (meta key `excludedCredits`,
+//   a JSON list of lowercase name patterns). A credit whose name contains
+//   any pattern (case-insensitive substring) is filtered out of the
+//   dashboard list and out of every total. Its rows stay in the DB (their
+//   postings stay assigned, so nothing leaks into Unassigned), and
+//   un-hiding restores it exactly. When the preference has never been set,
+//   DEFAULT_EXCLUDED_PATTERNS applies — the built-in list covering
+//   ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
+//   entertainment, and Walmart+.
+//   There is deliberately no settings UI for this on the web page: the
+//   user changes it by asking their assistant in chat, which calls the
+//   getPreferences / setExcludedCredits actions.
 // - Always display: Business Gold Flexible Business Credit ($20/mo, office
 //   supply) and Business Platinum Wireless Credit ($10/mo, mobile phone
 //   bill). These are pinned active in the dashboard view even if an earlier
 //   "stop tracking" toggled them off.
 // ---------------------------------------------------------------------------
 
-export const EXCLUDED_NAME_PATTERNS = [
+/** Meta key holding the exclusion preference (JSON array of patterns). */
+export const EXCLUDED_CREDITS_META_KEY = "excludedCredits";
+
+/** Built-in exclusion list, in force until the user stores a preference. */
+export const DEFAULT_EXCLUDED_PATTERNS = [
   "chatgpt",
   "indeed",
   "adobe",
@@ -115,9 +127,84 @@ export const EXCLUDED_NAME_PATTERNS = [
   "walmart",
 ];
 
-export function isExcludedName(name: string): boolean {
+/**
+ * Canonical display names for the credit families the default patterns
+ * hide. setExcludedCredits validation accepts an entry when it matches
+ * one of these names (or a catalog / stored credit name).
+ */
+export const HIDEABLE_CREDIT_NAMES = [
+  "ChatGPT Business Credit",
+  "Indeed Credit",
+  "Adobe Credit",
+  "CLEAR+ Credit",
+  "Equinox Credit",
+  "Digital Entertainment Credit",
+  "Walmart+ Credit",
+];
+
+/** Every credit name in the built-in catalogs (all products). */
+const ALL_CATALOG_CREDIT_NAMES: string[] = [
+  BIZ_PLAT,
+  PERSONAL_PLAT,
+  ASPIRE,
+  BRILLIANT,
+  BIZ_GOLD,
+  SAPPHIRE_PREFERRED,
+  HYATT_BUSINESS,
+  IHG_PREMIER,
+  RITZ_CARLTON,
+].flatMap((defs) => defs.map((d) => d.name));
+
+export function isExcludedName(
+  name: string,
+  patterns: readonly string[] = DEFAULT_EXCLUDED_PATTERNS,
+): boolean {
   const n = name.toLowerCase();
-  return EXCLUDED_NAME_PATTERNS.some((p) => n.includes(p));
+  return patterns.some((p) => p !== "" && n.includes(p));
+}
+
+/**
+ * Parse the stored exclusion preference. Returns null when it was never
+ * set (or is unreadable) — the caller then falls back to
+ * DEFAULT_EXCLUDED_PATTERNS. A stored empty array is meaningful (the user
+ * un-hid everything) and returns [].
+ */
+export function parseExcludedPatterns(
+  raw: string | null | undefined,
+): string[] | null {
+  if (raw == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out: string[] = [];
+    for (const v of parsed) {
+      if (typeof v !== "string") return null;
+      const p = v.trim().toLowerCase();
+      if (p !== "" && !out.includes(p)) out.push(p);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an exclusion entry plausibly names a real credit: it must share
+ * a substring relationship (either way) with a known credit name, so a
+ * typo or an invented name is rejected while both the short pattern
+ * ("chatgpt") and the full name ("ChatGPT Business Credit") are accepted.
+ * Entries under 3 characters match almost everything and are never valid.
+ */
+export function isKnownExclusionEntry(
+  entry: string,
+  knownNames: readonly string[],
+): boolean {
+  const e = entry.trim().toLowerCase();
+  if (e.length < 3) return false;
+  return knownNames.some((n) => {
+    const name = n.toLowerCase();
+    return name.includes(e) || e.includes(name);
+  });
 }
 
 export function isPinnedCredit(name: string): boolean {
@@ -392,6 +479,20 @@ const dashboardResponse = z.object({
   /** Display labels for the two Amex logins (owner keys "A" and "B"). */
   ownerLabels: z.tuple([z.string(), z.string()]),
   /**
+   * Effective display-exclusion patterns in force: the stored preference
+   * (meta `excludedCredits`) when set, otherwise the built-in defaults.
+   */
+  excludedPatterns: z.array(z.string()),
+  /** Credit rows hidden by the exclusion preference — never counted in any total. */
+  hiddenCredits: z.array(
+    z.object({
+      name: z.string(),
+      accountName: z.string(),
+      mask: z.string(),
+      owner: z.string().nullable(),
+    }),
+  ),
+  /**
    * Earliest date the stored postings cumulatively cover (YYYY-MM-DD).
    * Daily refreshes only fetch a trailing 30-day window, but stored data is
    * merge-only, so this stays at Jan 1 of the current year once bootstrapped.
@@ -470,6 +571,12 @@ async function computeDashboard(
         metaRows.find((r) => r.key === "dataCoverageStart")?.value ?? null;
       const lastRefreshWindowStart =
         metaRows.find((r) => r.key === "lastRefreshWindowStart")?.value ?? null;
+      // Display-exclusion preference: the stored list when the user (via
+      // their assistant) has set one, otherwise the built-in defaults.
+      const excludedPatterns =
+        parseExcludedPatterns(
+          metaRows.find((r) => r.key === EXCLUDED_CREDITS_META_KEY)?.value,
+        ) ?? DEFAULT_EXCLUDED_PATTERNS;
 
       const accountById = new Map(accountRows.map((a) => [a.id, a]));
       const postingsByCredit = new Map<number, typeof postingRows>();
@@ -487,7 +594,7 @@ async function computeDashboard(
       const credits = creditRows
         .filter((c) => {
           const acct = accountById.get(c.accountId);
-          return acct && acct.ignored === 0 && !isExcludedName(c.name);
+          return acct && acct.ignored === 0 && !isExcludedName(c.name, excludedPatterns);
         })
         .map((c) => {
           const acct = accountById.get(c.accountId)!;
@@ -555,7 +662,7 @@ async function computeDashboard(
       const unassigned = postingRows
         .filter((p) => {
           if (p.creditId != null) return false;
-          if (isExcludedName(p.name)) return false;
+          if (isExcludedName(p.name, excludedPatterns)) return false;
           const acct = accountById.get(p.accountId);
           return acct && acct.ignored === 0;
         })
@@ -580,9 +687,34 @@ async function computeDashboard(
         creditCountByAccount.set(c.accountId, (creditCountByAccount.get(c.accountId) ?? 0) + 1);
       }
 
+      // The credits the preference hides: surfaced by name (never tallied)
+      // so the Agent Markdown can tell an assistant they exist and can be
+      // re-enabled via chat.
+      const hiddenCredits = creditRows
+        .filter((c) => {
+          const acct = accountById.get(c.accountId);
+          return acct && acct.ignored === 0 && isExcludedName(c.name, excludedPatterns);
+        })
+        .map((c) => {
+          const acct = accountById.get(c.accountId)!;
+          return {
+            name: c.name,
+            accountName: acct.name,
+            mask: acct.mask,
+            owner: ownerLabelFor(acct.owner, ownerLabels),
+          };
+        })
+        .sort((a, b) =>
+          a.name === b.name
+            ? a.accountName.localeCompare(b.accountName)
+            : a.name.localeCompare(b.name),
+        );
+
       return {
         lastImportAt,
         ownerLabels,
+        excludedPatterns,
+        hiddenCredits,
         dataCoverageStart,
         lastRefreshWindowStart,
         today,
@@ -1101,6 +1233,78 @@ export const Actions = {
       }
       if (writes.length > 0) ctx.invalidateQueries();
       return { ok: true as const };
+    },
+  }),
+
+  // Display-exclusion preference: which credits the dashboard hides.
+  // Stored in meta as JSON under `excludedCredits`; when it has never been
+  // set, the built-in DEFAULT_EXCLUDED_PATTERNS applies. There is no
+  // settings UI on the web page — the user asks their assistant in chat
+  // and the assistant reads / rewrites the preference through these two
+  // actions. Hidden credits stay out of the dashboard list and every
+  // total, and are named in the Agent Markdown so an assistant knows they
+  // exist.
+  getPreferences: defineAction({
+    request: z.object({}),
+    response: z.object({ excludedCredits: z.array(z.string()) }),
+    async handler(ctx) {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.meta)
+        .where(eq(schema.meta.key, EXCLUDED_CREDITS_META_KEY));
+      return {
+        excludedCredits:
+          parseExcludedPatterns(rows[0]?.value) ?? [...DEFAULT_EXCLUDED_PATTERNS],
+      };
+    },
+  }),
+
+  setExcludedCredits: defineAction({
+    request: z.object({
+      /** The COMPLETE new exclusion list — it replaces the stored one. */
+      excludedCredits: z.array(z.string().min(1).max(80)).max(50),
+    }),
+    response: z.object({ excludedCredits: z.array(z.string()) }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      const normalized: string[] = [];
+      for (const raw of args.excludedCredits) {
+        const p = raw.trim().toLowerCase();
+        if (p !== "" && !normalized.includes(p)) normalized.push(p);
+      }
+      // Validate against every credit name the app knows: the built-in
+      // catalogs, the hideable families behind the defaults, and the
+      // credit rows actually stored (the user may have renamed or added
+      // credits). Unknown names are rejected, so a typo cannot silently
+      // hide the wrong credit — or fail to hide the intended one.
+      const storedNames = (
+        await db.select({ name: schema.credits.name }).from(schema.credits)
+      ).map((r) => r.name);
+      const knownNames = [
+        ...ALL_CATALOG_CREDIT_NAMES,
+        ...HIDEABLE_CREDIT_NAMES,
+        ...storedNames,
+      ];
+      const unknown = normalized.filter(
+        (p) => !isKnownExclusionEntry(p, knownNames),
+      );
+      if (unknown.length > 0) {
+        throw new Error(
+          `setExcludedCredits: unknown credit name(s): ${unknown.join(", ")} — ` +
+            "each entry must match a credit from the catalog or the stored credits",
+        );
+      }
+      const value = JSON.stringify(normalized);
+      await db
+        .insert(schema.meta)
+        .values({ key: EXCLUDED_CREDITS_META_KEY, value })
+        .onConflictDoUpdate({
+          target: schema.meta.key,
+          set: { value },
+        });
+      ctx.invalidateQueries();
+      return { excludedCredits: normalized };
     },
   }),
 
