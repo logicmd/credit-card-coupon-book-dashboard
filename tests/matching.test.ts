@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { accountDuplicateKey, matchCreditForPosting } from "../server/src/actions";
+import {
+  accountDuplicateKey,
+  catalogFor,
+  matchCreditForPosting,
+} from "../server/src/actions";
 
 describe("matchCreditForPosting — posting name to credit auto-mapping", () => {
   const credits = [
@@ -35,6 +39,19 @@ describe("matchCreditForPosting — posting name to credit auto-mapping", () => 
   test("no match returns undefined (posting stays unassigned)", () => {
     expect(matchCreditForPosting(credits, "Mystery Statement Credit")).toBeUndefined();
     expect(matchCreditForPosting([], "AMEX Flight Credit")).toBeUndefined();
+  });
+
+  test("Hyatt's generic 'CREDIT ADJUSTMENT' posting matches on the Hyatt account only", () => {
+    // Matching is scoped to the account's own credits: the Hyatt Business
+    // catalog carries the "credit adjustment" pattern, so the generic
+    // posting name resolves there — and nowhere else.
+    const asCredits = (accountName: string) =>
+      (catalogFor(accountName) ?? []).map((d) => ({ name: d.name, matchPattern: d.pattern }));
+    expect(matchCreditForPosting(asCredits("World of Hyatt Business Credit Card"), "CREDIT ADJUSTMENT")?.name).toBe(
+      "Hyatt Credit",
+    );
+    expect(matchCreditForPosting(asCredits("Business Platinum Card®"), "CREDIT ADJUSTMENT")).toBeUndefined();
+    expect(matchCreditForPosting(asCredits("Hilton Honors Aspire Card"), "CREDIT ADJUSTMENT")).toBeUndefined();
   });
 });
 

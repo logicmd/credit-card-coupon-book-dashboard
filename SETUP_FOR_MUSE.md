@@ -10,7 +10,7 @@ If the user already has an artifact with that slug, stop and ask before replacin
 
 ## 2. Connect Plaid
 
-The app's data comes from the Plaid connector. Check whether the user has Plaid connected; if not, walk them through connecting it and linking their American Express login(s). Households commonly have **two** Amex logins (e.g. the user and their spouse) — link both if they exist.
+The app's data comes from the Plaid connector. Check whether the user has Plaid connected; if not, walk them through connecting it and linking their American Express login(s). Households commonly have **two** Amex logins (e.g. the user and their spouse) — link both if they exist. If the user also holds Chase cards with coupon-book credits (Sapphire Preferred, World of Hyatt Business, IHG One Rewards Premier, Ritz-Carlton), link the Chase login too — the catalog covers those products, including their anniversary-year cycles.
 
 Do not ask for, accept, or store Amex usernames/passwords yourself. The connection happens through the connector's own flow.
 
@@ -33,7 +33,7 @@ The built-in exclusion list already hides credits most people cannot or do not w
 
 ## 6. Set the daily refresh (recommended)
 
-Create a scheduled job (cron) that runs every morning and invokes the app's refresh: it pulls only the **last 30 days** from Plaid, diffs against stored postings by transaction ID, and merges — never deletes. Attribution is by transaction date (`authorized_date`). The job should stay silent unless the refresh fails.
+Create a scheduled job (cron) that runs every morning and invokes the app's refresh: it pulls only the **last 30 days** from Plaid, diffs against stored postings by transaction ID, and merges — never deletes. Attribution is by transaction date: for every posting, pass the Plaid `authorized_date` as `transactionDate` alongside the posted `date` (the app buckets by `transactionDate`; a re-import may correct a stored transaction date in place). The job should stay silent unless the refresh fails.
 
 Optionally also offer a monthly reminder (e.g. on the 24th) summarizing credits that will expire at the end of the current period with a remaining balance. Only create it if the user says yes.
 

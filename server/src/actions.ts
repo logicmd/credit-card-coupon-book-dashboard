@@ -1,8 +1,8 @@
 // Actions for the Amex Credits Dashboard.
 //
 // Data model: Plaid (via the connector CLI, read by an agent task or by the
-// initial seed import) supplies Amex accounts and the actual statement-credit
-// postings Amex paid out. Usage is computed ONLY from those postings — never
+// initial seed import) supplies card accounts and the actual statement-credit
+// postings the issuer paid out. Usage is computed ONLY from those postings — never
 // inferred from merchant spending. The credit catalog (amount + calendar
 // period per card product) is seeded on first import and fully editable.
 
@@ -22,6 +22,13 @@ type CreditDef = {
   period: Period;
   pattern: string;
   note?: string;
+  /**
+   * Anniversary anchor for annual credits (e.g. 5/1): the credit year runs
+   * anchor-to-anchor instead of Jan 1 – Dec 31. Only meaningful with
+   * period "annual".
+   */
+  anchorMonth?: number;
+  anchorDay?: number;
 };
 
 const BIZ_PLAT: CreditDef[] = [
@@ -54,6 +61,35 @@ const BRILLIANT: CreditDef[] = [
 
 const BIZ_GOLD: CreditDef[] = [
   { name: "Flexible Business Credit", amount: 20, period: "monthly", pattern: "flexible", note: "Grubhub, FedEx, and U.S. office supply stores — the $20/mo office supply credit" },
+];
+
+// ---------------------------------------------------------------------------
+// Chase catalog: published benefit terms per Chase card product. Chase
+// coupons mostly run on the cardmember anniversary year (anchored to the
+// account anniversary, May 1 for these defaults — edit the credit's anchor
+// if yours differs), not the calendar year.
+// ---------------------------------------------------------------------------
+
+const SAPPHIRE_PREFERRED: CreditDef[] = [
+  { name: "Annual Hotel Credit", amount: 50, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "annual hotel credit", note: "Hotel bookings through Chase Travel only; runs on the cardmember anniversary year" },
+];
+
+const HYATT_BUSINESS: CreditDef[] = [
+  // The statement credit posts under the generic name "CREDIT ADJUSTMENT".
+  // Matching is always scoped to the account's own credits, so this pattern
+  // only ever fires on this card.
+  { name: "Hyatt Credit", amount: 100, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "credit adjustment", note: "$50 back per $50+ purchase at Hyatt properties, up to 2x per anniversary year" },
+];
+
+const IHG_PREMIER: CreditDef[] = [
+  { name: "Airline Credit", amount: 100, period: "annual", pattern: "airline credit", note: "Posts when a single flight purchase of $250+ is made directly with the airline" },
+  // Not a statement credit: Chase deposits TravelBank cash after a one-time
+  // enrollment. Empty pattern = never auto-matched; record it manually.
+  { name: "United TravelBank Credit", amount: 25, period: "semiannual", pattern: "", note: "Deposited to your United TravelBank each half (Jan & Jul) after a one-time enrollment; deposited funds expire after about 6 months — record it manually when it lands" },
+];
+
+const RITZ_CARLTON: CreditDef[] = [
+  { name: "Travel Credit", amount: 300, period: "annual", pattern: "travel credit", note: "Airline incidentals only; NOT automatic — request it via J.P. Morgan Priority Services within 4 billing cycles of the purchase" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -112,6 +148,12 @@ export function ownerLabelFor(
 }
 
 export function catalogFor(accountName: string): CreditDef[] | null {  const n = accountName.toLowerCase();
+  // Chase products first: their names never contain the Amex product
+  // keywords below, but checking them first keeps the issuers unambiguous.
+  if (n.includes("sapphire preferred")) return SAPPHIRE_PREFERRED;
+  if (n.includes("world of hyatt") && n.includes("business")) return HYATT_BUSINESS;
+  if (n.includes("ihg") && n.includes("premier")) return IHG_PREMIER;
+  if (n.includes("ritz-carlton")) return RITZ_CARLTON;
   if (n.includes("business platinum")) return BIZ_PLAT;
   if (n.includes("aspire")) return ASPIRE;
   if (n.includes("brilliant")) return BRILLIANT;
@@ -134,6 +176,21 @@ export function matchCreditForPosting<T extends { matchPattern: string }>(
   return credits.find(
     (c) => c.matchPattern !== "" && lower.includes(c.matchPattern.toLowerCase()),
   );
+}
+
+/** Issuer ("Amex" / "Chase") for a card, inferred from its product name. */
+export function issuerForAccountName(accountName: string): string {
+  const n = accountName.toLowerCase();
+  if (
+    n.includes("chase") ||
+    n.includes("sapphire") ||
+    n.includes("ritz-carlton") ||
+    n.includes("ihg") ||
+    n.includes("world of hyatt")
+  ) {
+    return "Chase";
+  }
+  return "Amex";
 }
 
 /**
@@ -187,8 +244,32 @@ const MONTH_NAMES = [
 
 export type Bounds = { start: string; end: string; key: string; label: string };
 
-export function periodBounds(period: Period, dateStr: string): Bounds {
+/** Anniversary anchor (month/day) for an annual credit's cycle. */
+export type Anchor = { month: number; day: number };
+
+export function periodBounds(period: Period, dateStr: string, anchor?: Anchor | null): Bounds {
   const { y, m } = parseDate(dateStr);
+  if (period === "annual" && anchor) {
+    // Anniversary-anchored year: runs from this year's anchor date through
+    // the day before next year's anchor date (May 1 2026 – Apr 30 2027).
+    const anchorDayThisYear = Math.min(anchor.day, daysInMonth(y, anchor.month));
+    const startsThisYear = dateStr >= fmt(y, anchor.month, anchorDayThisYear);
+    const startY = startsThisYear ? y : y - 1;
+    const start = fmt(startY, anchor.month, Math.min(anchor.day, daysInMonth(startY, anchor.month)));
+    const nextAnchor = fmt(
+      startY + 1,
+      anchor.month,
+      Math.min(anchor.day, daysInMonth(startY + 1, anchor.month)),
+    );
+    const end = addDays(nextAnchor, -1);
+    const endParts = parseDate(end);
+    return {
+      start,
+      end,
+      key: `${startY}-A${String(anchor.month).padStart(2, "0")}${String(anchor.day).padStart(2, "0")}`,
+      label: `${MONTH_NAMES[anchor.month - 1] ?? ""} ${startY} – ${MONTH_NAMES[endParts.m - 1] ?? ""} ${endParts.y}`,
+    };
+  }
   if (period === "monthly") {
     return {
       start: fmt(y, m, 1),
@@ -236,6 +317,18 @@ export function addDays(dateStr: string, delta: number): string {
   return fmt(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
 }
 
+/**
+ * The date a posting counts toward: its transaction date (Plaid
+ * `authorized_date`) when known, otherwise its posted date. Period
+ * bucketing ALWAYS uses this — never the raw posted date.
+ */
+export function transactionDateOf(p: {
+  date: string;
+  transactionDate?: string | null;
+}): string {
+  return p.transactionDate ?? p.date;
+}
+
 /** LA calendar date (YYYY-MM-DD) of an ISO timestamp, or null if unparseable. */
 export function laDateOf(iso: string): string | null {
   const d = new Date(iso);
@@ -263,6 +356,9 @@ const creditView = z.object({
   name: z.string(),
   amount: z.number(),
   period: periodEnum,
+  /** Anniversary anchor for annual credits; null for calendar-cycle credits. */
+  anchorMonth: z.number().nullable(),
+  anchorDay: z.number().nullable(),
   enrolled: z.boolean(),
   active: z.boolean(),
   note: z.string(),
@@ -272,9 +368,19 @@ const creditView = z.object({
   periodLabel: z.string(),
   periodStart: z.string(),
   periodEnd: z.string(),
+  /** First day of the next period — when a used-up credit renews. */
+  nextPeriodStart: z.string(),
   daysLeft: z.number(),
   currentPostings: z.array(
-    z.object({ id: z.number(), date: z.string(), name: z.string(), amount: z.number() }),
+    z.object({
+      id: z.number(),
+      /** Transaction date (authorized_date) — the date the posting counts toward. */
+      date: z.string(),
+      /** Posted date (when the credit hit the statement); equals `date` unless they differ. */
+      postedDate: z.string(),
+      name: z.string(),
+      amount: z.number(),
+    }),
   ),
 });
 
@@ -296,6 +402,7 @@ const dashboardResponse = z.object({
       id: z.number(),
       name: z.string(),
       mask: z.string(),
+      issuer: z.string(),
       owner: z.string().nullable(),
       balance: z.number().nullable(),
       ignored: z.boolean(),
@@ -306,7 +413,10 @@ const dashboardResponse = z.object({
   unassigned: z.array(
     z.object({
       id: z.number(),
+      /** Transaction date (authorized_date) — the date the posting counts toward. */
       date: z.string(),
+      /** Posted date; equals `date` unless they differ. */
+      postedDate: z.string(),
       name: z.string(),
       amount: z.number(),
       accountId: z.number(),
@@ -374,9 +484,19 @@ export const Actions = {
           const acct = accountById.get(c.accountId)!;
           const period = c.period as Period;
           const effectiveActive = c.active === 1 || isPinnedCredit(c.name);
-          const bounds = periodBounds(period, today);
+          const anchor =
+            c.anchorMonth != null && c.anchorDay != null
+              ? { month: c.anchorMonth, day: c.anchorDay }
+              : null;
+          const bounds = periodBounds(period, today, anchor);
           const mine = postingsByCredit.get(c.id) ?? [];
-          const inPeriod = mine.filter((p) => p.date >= bounds.start && p.date <= bounds.end);
+          // Bucketing is by TRANSACTION date (authorized_date), never the
+          // posted date: a credit authorized Sep 30 that posted Oct 2
+          // counts in Q3, not Q4.
+          const inPeriod = mine.filter((p) => {
+            const td = transactionDateOf(p);
+            return td >= bounds.start && td <= bounds.end;
+          });
           const used = inPeriod.reduce((s, p) => s + p.amount, 0);
           const remaining = Math.max(0, Math.round((c.amount - used) * 100) / 100);
           const daysLeft = daysBetween(today, bounds.end);
@@ -399,6 +519,8 @@ export const Actions = {
             name: c.name,
             amount: c.amount,
             period,
+            anchorMonth: c.anchorMonth,
+            anchorDay: c.anchorDay,
             enrolled: c.enrolled === 1,
             active: effectiveActive,
             note: c.note,
@@ -408,10 +530,12 @@ export const Actions = {
             periodLabel: bounds.label,
             periodStart: bounds.start,
             periodEnd: bounds.end,
+            nextPeriodStart: addDays(bounds.end, 1),
             daysLeft,
             currentPostings: inPeriod.map((p) => ({
               id: p.id,
-              date: p.date,
+              date: transactionDateOf(p),
+              postedDate: p.date,
               name: p.name,
               amount: p.amount,
             })),
@@ -430,7 +554,8 @@ export const Actions = {
           const acct = accountById.get(p.accountId)!;
           return {
             id: p.id,
-            date: p.date,
+            date: transactionDateOf(p),
+            postedDate: p.date,
             name: p.name,
             amount: p.amount,
             accountId: p.accountId,
@@ -455,6 +580,7 @@ export const Actions = {
           id: a.id,
           name: a.name,
           mask: a.mask,
+          issuer: a.issuer,
           owner: ownerLabelFor(a.owner, ownerLabels),
           balance: a.balance,
           ignored: a.ignored === 1,
@@ -481,6 +607,10 @@ export const Actions = {
   // postings / user edits are never touched. A posting that is absent from
   // the payload (e.g. it falls outside the fetched window) stays stored and
   // keeps counting. There is deliberately no delete/clear path here.
+  // One in-place exception: re-importing a known transaction id MAY correct
+  // its stored transactionDate (Plaid sometimes finalizes authorized_date
+  // after the first read). The correction updates the date in place — it
+  // never duplicates the posting and never touches its amount or mapping.
   importSnapshot: defineAction({
     request: z.object({
       /** Start of the window this payload was fetched over (YYYY-MM-DD). */
@@ -503,8 +633,10 @@ export const Actions = {
           mask: z.string().default(""),
           balance: z.number().nullable().optional(),
           creditLimit: z.number().nullable().optional(),
-          /** Which Amex login this account belongs to, as a key: "A" or "B". */
+          /** Which login this account belongs to, as a key: "A" or "B". */
           owner: z.string().optional(),
+          /** Issuer ("Amex" / "Chase"); inferred from the card name when omitted. */
+          issuer: z.string().optional(),
           /** Explicit duplicate flag from a curated import; wins over the heuristic. */
           ignored: z.boolean().optional(),
         }),
@@ -513,7 +645,15 @@ export const Actions = {
         z.object({
           txnId: z.string().min(1),
           accountPlaidId: z.string().min(1),
+          /** Posted date (Plaid `date`) — display only. */
           date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          /**
+           * Transaction date (Plaid `authorized_date`) — the date the
+           * posting counts toward. Falls back to the posted date when
+           * absent. Re-importing a known txnId with a different
+           * transactionDate corrects the stored value in place.
+           */
+          transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
           name: z.string().min(1),
           amount: z.number().positive(),
         }),
@@ -524,6 +664,8 @@ export const Actions = {
       accountsAdded: z.number(),
       postingsAdded: z.number(),
       postingsSkipped: z.number(),
+      /** Known postings whose stored transactionDate was corrected in place. */
+      postingsCorrected: z.number(),
       /** Postings already stored before this import — all of them are kept. */
       existingPostingsPreserved: z.number(),
       /** Earliest date the stored postings now cumulatively cover. */
@@ -550,6 +692,7 @@ export const Actions = {
       let accountsAdded = 0;
       for (const a of args.accounts) {
         const owner = a.owner ?? null;
+        const issuer = a.issuer ?? issuerForAccountName(a.name);
         const known = byPlaidId.get(a.plaidAccountId);
         if (known) {
           await db
@@ -558,6 +701,7 @@ export const Actions = {
               balance: a.balance ?? known.balance,
               name: a.name,
               mask: a.mask,
+              ...(a.issuer ? { issuer: a.issuer } : {}),
               ...(owner ? { owner } : {}),
               ...(a.ignored !== undefined ? { ignored: a.ignored ? 1 : 0 } : {}),
             })
@@ -578,6 +722,7 @@ export const Actions = {
             mask: a.mask,
             balance: a.balance ?? null,
             creditLimit: a.creditLimit ?? null,
+            issuer,
             owner,
             ignored,
           })
@@ -592,6 +737,7 @@ export const Actions = {
           mask: a.mask,
           balance: a.balance ?? null,
           creditLimit: a.creditLimit ?? null,
+          issuer,
           owner,
           ignored,
           createdAt: new Date(),
@@ -618,6 +764,8 @@ export const Actions = {
           name: d.name,
           amount: d.amount,
           period: d.period,
+          anchorMonth: d.anchorMonth ?? null,
+          anchorDay: d.anchorDay ?? null,
           matchPattern: d.pattern,
           note: d.note ?? "",
           sortOrder: i,
@@ -631,16 +779,42 @@ export const Actions = {
 
       // Import postings, deduped by Plaid transaction id, auto-mapped by
       // the account's catalog match patterns.
-      const existingTxns = new Set(
-        (await db.select({ txnId: schema.postings.txnId }).from(schema.postings))
-          .map((r) => r.txnId)
-          .filter((t): t is string => t != null),
+      const existingByTxn = new Map(
+        (
+          await db
+            .select({
+              id: schema.postings.id,
+              txnId: schema.postings.txnId,
+              date: schema.postings.date,
+              transactionDate: schema.postings.transactionDate,
+            })
+            .from(schema.postings)
+        )
+          .filter((r): r is typeof r & { txnId: string } => r.txnId != null)
+          .map((r) => [r.txnId, r] as const),
       );
       let postingsAdded = 0;
       let postingsSkipped = 0;
+      let postingsCorrected = 0;
       for (const p of args.postings) {
-        if (existingTxns.has(p.txnId)) {
-          postingsSkipped++;
+        const knownPosting = existingByTxn.get(p.txnId);
+        if (knownPosting) {
+          // Already stored: never duplicate. The one allowed in-place fix
+          // is the transaction date — if this read carries a different
+          // authorized_date, correct the stored value so the posting moves
+          // to the right period bucket.
+          if (
+            p.transactionDate !== undefined &&
+            p.transactionDate !== transactionDateOf(knownPosting)
+          ) {
+            await db
+              .update(schema.postings)
+              .set({ transactionDate: p.transactionDate })
+              .where(eq(schema.postings.id, knownPosting.id));
+            postingsCorrected++;
+          } else {
+            postingsSkipped++;
+          }
           continue;
         }
         const acct = byPlaidId.get(p.accountPlaidId);
@@ -649,16 +823,28 @@ export const Actions = {
           continue;
         }
         const match = matchCreditForPosting(creditsByAccount.get(acct.id) ?? [], p.name);
-        await db.insert(schema.postings).values({
-          txnId: p.txnId,
-          accountId: acct.id,
-          creditId: match?.id ?? null,
-          date: p.date,
-          name: p.name,
-          amount: p.amount,
-          source: "plaid",
-        });
-        existingTxns.add(p.txnId);
+        const insertedPosting = await db
+          .insert(schema.postings)
+          .values({
+            txnId: p.txnId,
+            accountId: acct.id,
+            creditId: match?.id ?? null,
+            date: p.date,
+            transactionDate: p.transactionDate ?? null,
+            name: p.name,
+            amount: p.amount,
+            source: "plaid",
+          })
+          .returning({ id: schema.postings.id });
+        const newRow = insertedPosting[0];
+        if (newRow) {
+          existingByTxn.set(p.txnId, {
+            id: newRow.id,
+            txnId: p.txnId,
+            date: p.date,
+            transactionDate: p.transactionDate ?? null,
+          });
+        }
         postingsAdded++;
       }
 
@@ -687,10 +873,10 @@ export const Actions = {
       const metaRows = await db.select().from(schema.meta);
       const prevCoverage =
         metaRows.find((r) => r.key === "dataCoverageStart")?.value ?? null;
-      const earliestPayloadPosting = args.postings.reduce<string | null>(
-        (min, p) => (min == null || p.date < min ? p.date : min),
-        null,
-      );
+      const earliestPayloadPosting = args.postings.reduce<string | null>((min, p) => {
+        const eff = p.transactionDate ?? p.date;
+        return min == null || eff < min ? eff : min;
+      }, null);
       // Coverage is certified ONLY by a completed fetch: from its
       // windowStart (or, for a completed window-less import, its earliest
       // posting). A windowed import that did not complete certifies
@@ -743,6 +929,7 @@ export const Actions = {
         accountsAdded,
         postingsAdded,
         postingsSkipped,
+        postingsCorrected,
         existingPostingsPreserved: existingPostingsCount,
         dataCoverageStart,
       };
@@ -808,8 +995,8 @@ export const Actions = {
         "",
         "Steps:",
         "1. Run `/opt/hatch/bin/plaid accounts` and collect every account: plaidAccountId = account_id, name, mask, balance = balances.current, creditLimit = balances.limit. The output groups accounts by login under `institutions`: each institution entry is one Amex master account (one login). Set owner = \"A\" for every account in the first institution grouping and owner = \"B\" for every account in the second institution grouping (if there is only one, use \"A\" for all of them). Include owner on every account you pass.",
-        `2. Run \`/opt/hatch/bin/plaid transactions-get --start-date ${windowStart} --end-date ${today}\` (dates are America/Los_Angeles calendar dates). Fetch ONLY this window — ${windowReason}. Do not widen it. Keep only statement-credit postings: amount < 0, not pending, and the transaction name contains 'credit' (case-insensitive) or is exactly 'Hilton'. For each kept transaction produce: txnId = transaction_id, accountPlaidId = account_id, date (use the transaction's authorized_date when Plaid provides one, otherwise its date — credits count toward the period of the underlying transaction, not the later posting date), name, amount = the absolute value of amount (positive dollars of credit received).`,
-        `3. Call this artifact's \`importSnapshot\` action with { accounts, postings, windowStart: "${windowStart}", windowEnd: "${today}", complete } exactly in that shape. Set complete to true ONLY if the Plaid accounts and transactions reads both succeeded for the entire window; if any read failed, was cut off, or returned partial data, set complete to false — the import then still merges what you read but does NOT certify the window as covered, so the next refresh retries this window instead of assuming the year is covered. The import is MERGE-ONLY: it inserts postings whose transaction id is new and never deletes, clears, or replaces stored data, so postings from earlier in the year (back to ${yearStart}) that fall outside this fetched window are preserved and keep counting — do not try to re-send or 'restore' them, and never pass an empty snapshot to reset anything. Call importSnapshot even if the window contains zero new postings (accounts plus an empty postings array, complete: true when the empty result is a successful read), so the refresh is recorded. Do not invent, rename, or round any values; copy names and amounts from the Plaid output verbatim. If Plaid reports not connected or a read fails, still call importSnapshot with whatever complete data you could read and complete: false, and say what was missing in your final message.`,
+        `2. Run \`/opt/hatch/bin/plaid transactions-get --start-date ${windowStart} --end-date ${today}\` (dates are America/Los_Angeles calendar dates). Fetch ONLY this window — ${windowReason}. Do not widen it. Keep only statement-credit postings: amount < 0, not pending, and the transaction name contains 'credit' (case-insensitive) or is exactly 'Hilton'. For each kept transaction produce: txnId = transaction_id, accountPlaidId = account_id, date = the transaction's posted date (its \`date\` field), transactionDate = its authorized_date — pass authorized_date as transactionDate for EVERY posting (when Plaid gives no authorized_date, set transactionDate to the posted date). Credits count toward the period of the TRANSACTION date, not the posting date; the posted date is kept for display only. name, amount = the absolute value of amount (positive dollars of credit received).`,
+        `3. Call this artifact's \`importSnapshot\` action with { accounts, postings, windowStart: "${windowStart}", windowEnd: "${today}", complete } exactly in that shape. Set complete to true ONLY if the Plaid accounts and transactions reads both succeeded for the entire window; if any read failed, was cut off, or returned partial data, set complete to false — the import then still merges what you read but does NOT certify the window as covered, so the next refresh retries this window instead of assuming the year is covered. The import is MERGE-ONLY: it inserts postings whose transaction id is new and never deletes, clears, or replaces stored data, so postings from earlier in the year (back to ${yearStart}) that fall outside this fetched window are preserved and keep counting — do not try to re-send or 'restore' them, and never pass an empty snapshot to reset anything. (One exception: if a re-fetched posting's authorized_date differs from what was stored, the import corrects its transactionDate in place — that is expected; always send both dates exactly as Plaid reports them.) Call importSnapshot even if the window contains zero new postings (accounts plus an empty postings array, complete: true when the empty result is a successful read), so the refresh is recorded. Do not invent, rename, or round any values; copy names and amounts from the Plaid output verbatim. If Plaid reports not connected or a read fails, still call importSnapshot with whatever complete data you could read and complete: false, and say what was missing in your final message.`,
       ].join("\n");
       const res = await ctx.agent.spawnTask(message, {
         expectsAction: "importSnapshot",
@@ -887,6 +1074,9 @@ export const Actions = {
       name: z.string().min(1).optional(),
       amount: z.number().nonnegative().optional(),
       period: periodEnum.optional(),
+      /** Anniversary anchor for annual credits; pass null to clear back to calendar-year. */
+      anchorMonth: z.number().int().min(1).max(12).nullable().optional(),
+      anchorDay: z.number().int().min(1).max(31).nullable().optional(),
       enrolled: z.boolean().optional(),
       active: z.boolean().optional(),
       note: z.string().optional(),
@@ -899,6 +1089,8 @@ export const Actions = {
       if (args.name !== undefined) patch.name = args.name;
       if (args.amount !== undefined) patch.amount = args.amount;
       if (args.period !== undefined) patch.period = args.period;
+      if (args.anchorMonth !== undefined) patch.anchorMonth = args.anchorMonth;
+      if (args.anchorDay !== undefined) patch.anchorDay = args.anchorDay;
       if (args.enrolled !== undefined) patch.enrolled = args.enrolled ? 1 : 0;
       if (args.active !== undefined) patch.active = args.active ? 1 : 0;
       if (args.note !== undefined) patch.note = args.note;
@@ -917,6 +1109,8 @@ export const Actions = {
       name: z.string().min(1),
       amount: z.number().positive(),
       period: periodEnum,
+      anchorMonth: z.number().int().min(1).max(12).optional(),
+      anchorDay: z.number().int().min(1).max(31).optional(),
       note: z.string().default(""),
       matchPattern: z.string().default(""),
     }),
@@ -930,6 +1124,8 @@ export const Actions = {
           name: args.name,
           amount: args.amount,
           period: args.period,
+          anchorMonth: args.anchorMonth ?? null,
+          anchorDay: args.anchorDay ?? null,
           note: args.note,
           matchPattern: args.matchPattern,
           sortOrder: 100,

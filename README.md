@@ -1,13 +1,14 @@
 # Credit Card Coupon Book Dashboard
 
-Track every American Express statement credit across all your cards — and actually use them before they expire.
+Track every Amex and Chase statement credit across all your cards — and actually use them before they expire.
 
-If you hold multiple Amex cards (Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual. They are easy to forget and Amex does not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
+If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant, Chase Sapphire Preferred…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual — and some run on your cardmember anniversary year instead of the calendar year. They are easy to forget and issuers do not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
 
 ## Features
 
 - **Real usage, not guesses** — usage is computed from the actual statement-credit postings on your accounts (e.g. `Platinum Lululemon Credit`, `AMEX Flight Credit`), never inferred from spending.
-- **Transaction-date attribution** — a credit counts toward the period of the underlying transaction (`authorized_date`), not the day Amex posted it. A Hilton charge on Sep 30 whose credit posts Oct 2 counts in Q3, not Q4.
+- **Transaction-date attribution** — a credit counts toward the period of the underlying transaction (`authorized_date`), not the day the issuer posted it. A Hilton charge on Sep 30 whose credit posts Oct 2 counts in Q3, not Q4. Both dates are stored (the posted date is display-only), and a later import can correct a transaction date in place.
+- **Anniversary-year cycles** — credits whose program runs on your cardmember year (e.g. Chase Sapphire Preferred's hotel credit, World of Hyatt Business) carry an anchor date and run anchor-to-anchor (May 1 – Apr 30) instead of Jan 1 – Dec 31.
 - **Merged view** — the same credit on six cards shows as one row with the combined total; expand it to see each card.
 - **Two logins supported** — households often have cards spread across two Amex logins (e.g. you and your spouse). Each account is tagged with its login; labels are configurable ("Login 1" / "Login 2" by default). Summary totals are always combined.
 - **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about (a built-in exclusion list, editable in code) never appear.
@@ -39,7 +40,7 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 
 - `server/src/actions.ts` — data actions: `importSnapshot` (merge-only Plaid import), `refreshCredits` (spawns the incremental 30-day refresh), `getDashboard`, credit/posting CRUD, `setOwnerLabels`.
 - `server/src/schema.ts` — accounts, credits, postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`).
-- The built-in catalog encodes public Amex program rules (amounts, periods, posting-name patterns) for Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Uber One credits, the discontinued Brilliant property credit, and Saks.
+- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Uber One credits, the discontinued Brilliant property credit, and Saks.
 
 ## Tests
 
@@ -47,14 +48,23 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 bun test
 ```
 
-The suite (in `tests/`) covers the core logic: calendar-period windows, the
-benefit catalog and exclusion list, posting→credit matching, duplicate-account
-detection, the merge-only import (re-importing a snapshot adds nothing),
-dashboard totals across cards, and the client-side grouping of same-type
-credits. DB-backed tests run the real action handlers against an in-memory
+The suite (in `tests/`) covers the core logic: calendar-period windows
+(incl. anniversary-anchored annual cycles), the benefit catalog and exclusion
+list, posting→credit matching, duplicate-account detection, the merge-only
+import (re-importing a snapshot adds nothing), transaction-date attribution
+and in-place date correction, Chase catalog seeding end to end, dashboard
+totals across cards, and the client-side grouping of same-type credits.
+DB-backed tests run the real action handlers against an in-memory
 SQLite database with the production migrations applied. All fixtures are
 fictional — invented people, fake card masks, and made-up amounts. See
 [tests/README.md](tests/README.md) for details and known coverage gaps.
+
+## Relationship to the live app
+
+This repo is the open-source mirror of a live, private deployment of the
+same dashboard. Personal data lives only in the live app's database (login
+labels included) — never in code. See [SYNC.md](SYNC.md) for how changes
+flow between the two and the feature set both sides keep in step.
 
 ## Privacy
 

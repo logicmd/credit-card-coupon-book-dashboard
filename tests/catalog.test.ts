@@ -4,6 +4,7 @@ import {
   DEFAULT_OWNER_LABELS,
   isExcludedName,
   isPinnedCredit,
+  issuerForAccountName,
   ownerLabelFor,
 } from "../server/src/actions";
 
@@ -56,6 +57,91 @@ describe("catalogFor — product detection", () => {
   test("matching is case-insensitive", () => {
     expect(catalogFor("hilton honors aspire card")).not.toBeNull();
     expect(catalogFor("BUSINESS GOLD CARD")).not.toBeNull();
+  });
+});
+
+describe("catalogFor — Chase products", () => {
+  test("Sapphire Preferred gets the $50 hotel credit on a May 1 anniversary anchor", () => {
+    const defs = catalogFor("Chase Sapphire Preferred®")!;
+    expect(defs).toEqual([
+      expect.objectContaining({
+        name: "Annual Hotel Credit",
+        amount: 50,
+        period: "annual",
+        anchorMonth: 5,
+        anchorDay: 1,
+        pattern: "annual hotel credit",
+      }),
+    ]);
+  });
+
+  test("World of Hyatt Business gets the $100 credit (2 x $50) on a May 1 anchor", () => {
+    const defs = catalogFor("World of Hyatt Business Credit Card")!;
+    expect(defs).toEqual([
+      expect.objectContaining({
+        name: "Hyatt Credit",
+        amount: 100,
+        period: "annual",
+        anchorMonth: 5,
+        anchorDay: 1,
+        pattern: "credit adjustment",
+      }),
+    ]);
+  });
+
+  test("the personal World of Hyatt card (no 'Business') has no catalog", () => {
+    expect(catalogFor("World of Hyatt Credit Card")).toBeNull();
+  });
+
+  test("IHG Premier gets the $100 airline credit plus the patternless TravelBank row", () => {
+    const defs = catalogFor("IHG One Rewards Premier Credit Card")!;
+    expect(defs).toEqual([
+      expect.objectContaining({ name: "Airline Credit", amount: 100, period: "annual" }),
+      // TravelBank is enrollment-based, not a statement credit: empty
+      // pattern so it never auto-matches a posting.
+      expect.objectContaining({
+        name: "United TravelBank Credit",
+        amount: 25,
+        period: "semiannual",
+        pattern: "",
+      }),
+    ]);
+  });
+
+  test("the non-Premier IHG card has no catalog", () => {
+    expect(catalogFor("IHG One Rewards Traveler Credit Card")).toBeNull();
+  });
+
+  test("Ritz-Carlton gets the $300 travel credit (manual request, calendar year)", () => {
+    const defs = catalogFor("The Ritz-Carlton® Credit Card")!;
+    expect(defs).toEqual([
+      expect.objectContaining({
+        name: "Travel Credit",
+        amount: 300,
+        period: "annual",
+        pattern: "travel credit",
+      }),
+    ]);
+    expect(defs[0]!.anchorMonth).toBeUndefined();
+  });
+});
+
+describe("issuerForAccountName", () => {
+  test("Chase products are Chase", () => {
+    for (const name of [
+      "Chase Sapphire Preferred®",
+      "World of Hyatt Business Credit Card",
+      "IHG One Rewards Premier Credit Card",
+      "The Ritz-Carlton® Credit Card",
+    ]) {
+      expect(issuerForAccountName(name)).toBe("Chase");
+    }
+  });
+
+  test("Amex products (and anything unrecognized) default to Amex", () => {
+    expect(issuerForAccountName("Hilton Honors Aspire Card")).toBe("Amex");
+    expect(issuerForAccountName("Business Platinum Card®")).toBe("Amex");
+    expect(issuerForAccountName("Generic Store Card")).toBe("Amex");
   });
 });
 

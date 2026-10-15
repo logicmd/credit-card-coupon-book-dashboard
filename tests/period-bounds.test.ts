@@ -86,13 +86,62 @@ describe("periodBounds — semiannual", () => {
 });
 
 describe("periodBounds — annual", () => {
-  test("annual is always the calendar year (no anniversary anchoring)", () => {
+  test("without an anchor, annual is the calendar year", () => {
     expect(periodBounds("annual", "2026-08-19")).toEqual({
       start: "2026-01-01",
       end: "2026-12-31",
       key: "2026",
       label: "2026",
     });
+  });
+
+  test("a null anchor behaves like no anchor", () => {
+    expect(periodBounds("annual", "2026-08-19", null).key).toBe("2026");
+  });
+});
+
+describe("periodBounds — anniversary-anchored annual", () => {
+  const MAY_1 = { month: 5, day: 1 };
+
+  test("a date after the anchor runs anchor-to-anchor into the next year", () => {
+    expect(periodBounds("annual", "2026-10-15", MAY_1)).toEqual({
+      start: "2026-05-01",
+      end: "2027-04-30",
+      key: "2026-A0501",
+      label: "May 2026 – April 2027",
+    });
+  });
+
+  test("a date before the anchor belongs to the cycle that started last year", () => {
+    expect(periodBounds("annual", "2026-03-10", MAY_1)).toEqual({
+      start: "2025-05-01",
+      end: "2026-04-30",
+      key: "2025-A0501",
+      label: "May 2025 – April 2026",
+    });
+  });
+
+  test("the anchor day itself starts the new cycle; the day before ends the old one", () => {
+    expect(periodBounds("annual", "2026-05-01", MAY_1).start).toBe("2026-05-01");
+    const before = periodBounds("annual", "2026-04-30", MAY_1);
+    expect(before.start).toBe("2025-05-01");
+    expect(before.end).toBe("2026-04-30");
+  });
+
+  test("the last day of the cycle is inside the same window as the first", () => {
+    expect(periodBounds("annual", "2027-04-30", MAY_1).key).toBe("2026-A0501");
+  });
+
+  test("a mid-month anchor works too", () => {
+    const b = periodBounds("annual", "2026-08-19", { month: 8, day: 15 });
+    expect(b.start).toBe("2026-08-15");
+    expect(b.end).toBe("2027-08-14");
+    expect(periodBounds("annual", "2026-08-14", { month: 8, day: 15 }).start).toBe("2025-08-15");
+  });
+
+  test("the anchor is ignored for non-annual periods", () => {
+    expect(periodBounds("quarterly", "2026-05-20", MAY_1).key).toBe("2026-Q2");
+    expect(periodBounds("monthly", "2026-05-20", MAY_1).key).toBe("2026-05");
   });
 });
 

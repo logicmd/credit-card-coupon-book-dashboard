@@ -1,10 +1,10 @@
-// Drizzle schema for the Amex Credits Dashboard.
+// Drizzle schema for the Credit Card Coupon Book Dashboard.
 //
-// accounts  — one row per Plaid Amex account record (supplementary-card
+// accounts  — one row per Plaid account record (supplementary-card
 //             duplicates across the two logins are flagged `ignored`).
 // credits   — the benefit catalog: one row per (account, credit) with its
 //             calendar-period amount. All rows user-editable.
-// postings  — actual Amex statement-credit postings imported from Plaid
+// postings  — actual statement-credit postings imported from Plaid
 //             (amount is positive = dollars of credit received), plus
 //             manual rows the user adds (txnId null, source 'manual').
 // meta      — key/value store (last import time, refresh task id, and the
@@ -19,8 +19,10 @@ export const accounts = sqliteTable("accounts", {
   mask: text("mask").notNull().default(""),
   balance: real("balance"),
   creditLimit: real("credit_limit"),
+  /** Card network issuer of this account: "Amex" or "Chase". */
+  issuer: text("issuer").notNull().default("Amex"),
   /**
-   * Which Amex login (master account) this account record belongs to,
+   * Which login (master account) this account record belongs to,
    * stored as a key: "A" for the first login, "B" for the second. The
    * display labels for the two keys live in the meta table (ownerALabel /
    * ownerBLabel) and default to "Login 1" / "Login 2". Null until
@@ -45,6 +47,15 @@ export const credits = sqliteTable("credits", {
   period: text("period", {
     enum: ["monthly", "quarterly", "semiannual", "annual"],
   }).notNull(),
+  /**
+   * Optional anniversary anchor for annual credits: when both are set, the
+   * credit's year runs anchor-to-anchor (e.g. month 5, day 1 = May 1 of one
+   * year through Apr 30 of the next) instead of the calendar year. Used by
+   * cardmember-anniversary programs (Chase Sapphire Preferred, World of
+   * Hyatt Business). Null for calendar-cycle credits.
+   */
+  anchorMonth: integer("anchor_month"),
+  anchorDay: integer("anchor_day"),
   /** Lowercase substring matched against Plaid posting names for auto-mapping. */
   matchPattern: text("match_pattern").notNull().default(""),
   enrolled: integer("enrolled").notNull().default(1),
@@ -60,8 +71,16 @@ export const postings = sqliteTable("postings", {
     .notNull()
     .references(() => accounts.id),
   creditId: integer("credit_id").references(() => credits.id),
-  /** YYYY-MM-DD (America/Los_Angeles calendar date of the posting). */
+  /** YYYY-MM-DD — the POSTED date (when the credit hit the statement). Display only. */
   date: text("date").notNull(),
+  /**
+   * YYYY-MM-DD — the TRANSACTION date (Plaid `authorized_date`): the date of
+   * the underlying transaction the credit belongs to. Period bucketing uses
+   * this date, never the posted date; a credit authorized Sep 30 but posted
+   * Oct 2 counts in Q3. Null when Plaid gave no authorized date — bucketing
+   * then falls back to the posted date.
+   */
+  transactionDate: text("transaction_date"),
   name: text("name").notNull(),
   /** Positive dollars of statement credit received. */
   amount: real("amount").notNull(),

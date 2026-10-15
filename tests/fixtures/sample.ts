@@ -42,6 +42,43 @@ export const SAM_STORE_CARD = {
   owner: "B",
 } as const;
 
+// Alex's Chase cards (fictional ids/masks, like everything in this file).
+export const ALEX_SAPPHIRE = {
+  plaidAccountId: "fake-alex-sapphire-6666",
+  name: "Chase Sapphire Preferred®",
+  mask: "6666",
+  balance: 0,
+  creditLimit: 5000,
+  owner: "A",
+} as const;
+
+export const ALEX_HYATT_BIZ = {
+  plaidAccountId: "fake-alex-hyattbiz-7777",
+  name: "World of Hyatt Business Credit Card",
+  mask: "7777",
+  balance: 0,
+  creditLimit: 9000,
+  owner: "A",
+} as const;
+
+export const ALEX_IHG_PREMIER = {
+  plaidAccountId: "fake-alex-ihg-8888",
+  name: "IHG One Rewards Premier Credit Card",
+  mask: "8888",
+  balance: 0,
+  creditLimit: 4000,
+  owner: "A",
+} as const;
+
+export const ALEX_RITZ = {
+  plaidAccountId: "fake-alex-ritz-9999",
+  name: "The Ritz-Carlton® Credit Card",
+  mask: "9999",
+  balance: 0,
+  creditLimit: 10000,
+  owner: "A",
+} as const;
+
 /** A complete January snapshot for Alex's two cards. */
 export const JANUARY_SNAPSHOT = {
   windowStart: "2026-01-01",

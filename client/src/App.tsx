@@ -11,6 +11,14 @@ type Period = Credit["period"];
 const money = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
+/** "2027-01-01" → "Jan 1, 2027" (interpreted as a plain calendar date). */
+const fmtDay = (iso: string) =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
 const MONO = "font-mono tabular-nums";
 
 function shortCard(name: string, mask: string): string {
@@ -61,6 +69,10 @@ function productPrefix(accountName: string): string {
   if (n.includes("blue business")) return "BBPlus";
   if (n.includes("bonvoy business")) return "BonvoyBiz";
   if (n.includes("everyday")) return "EveryDay";
+  if (n.includes("sapphire")) return "Sapphire";
+  if (n.includes("world of hyatt") && n.includes("business")) return "HyattBiz";
+  if (n.includes("ihg")) return "IHG";
+  if (n.includes("ritz")) return "Ritz";
   if (n.includes("platinum")) return "Plat";
   if (n.includes("gold")) return "Gold";
   return accountName.replace(/®/g, "").replace(" Card", "").trim().split(/\s+/)[0] ?? "";
@@ -352,7 +364,7 @@ function CreditRow({
               {done ? money(0) : money(c.currentRemaining)}
             </div>
             <div className="text-xs text-[var(--dim)]">
-              {done ? "used up ✓" : `${c.daysLeft}d left ${periodWord(c.period)}`}
+              {done ? `used up ✓ · renews ${fmtDay(c.nextPeriodStart)}` : `${c.daysLeft}d left ${periodWord(c.period)}`}
             </div>
           </div>
         </div>
@@ -374,6 +386,9 @@ function CreditRow({
                 <li key={p.id} className="flex items-baseline justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate">
                     <span className={`${MONO} text-[var(--dim)]`}>{p.date}</span> {p.name}
+                    {p.postedDate !== p.date && (
+                      <span className="text-[var(--dim)]"> · posted {p.postedDate}</span>
+                    )}
                   </span>
                   <span className={MONO}>{money(p.amount)}</span>
                 </li>
@@ -468,7 +483,7 @@ function GroupRow({
               {done ? money(0) : money(g.remaining)}
             </div>
             <div className="text-xs text-[var(--dim)]">
-              {done ? "used up ✓" : `${g.daysLeft}d left ${periodWord(g.period)}`}
+              {done ? `used up ✓ · renews ${fmtDay(g.members[0]!.nextPeriodStart)}` : `${g.daysLeft}d left ${periodWord(g.period)}`}
             </div>
           </div>
         </div>
@@ -585,6 +600,8 @@ function EditCreditForm({
   const [name, setName] = useState(c.name);
   const [amount, setAmount] = useState(String(c.amount));
   const [period, setPeriod] = useState<Period>(c.period);
+  const [anchorMonth, setAnchorMonth] = useState(c.anchorMonth != null ? String(c.anchorMonth) : "");
+  const [anchorDay, setAnchorDay] = useState(c.anchorDay != null ? String(c.anchorDay) : "");
   const [pattern, setPattern] = useState(c.matchPattern);
   const [note, setNote] = useState(c.note);
   const [msg, setMsg] = useState<string | null>(null);
@@ -595,6 +612,8 @@ function EditCreditForm({
         name: name.trim(),
         amount: Number(amount),
         period,
+        anchorMonth: period === "annual" && anchorMonth !== "" ? Number(anchorMonth) : null,
+        anchorDay: period === "annual" && anchorDay !== "" ? Number(anchorDay) : null,
         matchPattern: pattern.trim().toLowerCase(),
         note: note.trim(),
       }),
@@ -642,6 +661,18 @@ function EditCreditForm({
           <span className="mb-1 block text-xs text-[var(--dim)]">Plaid posting match (substring)</span>
           <input aria-label="Plaid posting match substring" value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="e.g. lululemon" className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm" />
         </label>
+        {period === "annual" && (
+          <>
+            <label className="block">
+              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor month (blank = calendar year)</span>
+              <input aria-label="Anniversary anchor month" inputMode="numeric" value={anchorMonth} onChange={(e) => setAnchorMonth(e.target.value)} placeholder="e.g. 5 for May" className={`${MONO} w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm`} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor day</span>
+              <input aria-label="Anniversary anchor day" inputMode="numeric" value={anchorDay} onChange={(e) => setAnchorDay(e.target.value)} placeholder="e.g. 1" className={`${MONO} w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm`} />
+            </label>
+          </>
+        )}
       </div>
       <label className="mt-2 block">
         <span className="mb-1 block text-xs text-[var(--dim)]">Note</span>
@@ -694,6 +725,9 @@ function UnassignedSection({ data, onChanged }: { data: Dashboard; onChanged: ()
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0 truncate text-sm">
                     <span className={`${MONO} text-[var(--dim)]`}>{p.date}</span> {p.name}
+                    {p.postedDate !== p.date && (
+                      <span className="text-[var(--dim)]"> · posted {p.postedDate}</span>
+                    )}
                   </span>
                   <span className={MONO}>{money(p.amount)}</span>
                 </div>
@@ -768,7 +802,7 @@ function LoginLabelsForm({
         <label className="block">
           <span className="mb-1 block text-xs text-[var(--dim)]">First login</span>
           <input
-            aria-label="Label for the first Amex login"
+            aria-label="Label for the first login"
             value={aLabel}
             onChange={(e) => setALabel(e.target.value)}
             className="w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm"
@@ -777,7 +811,7 @@ function LoginLabelsForm({
         <label className="block">
           <span className="mb-1 block text-xs text-[var(--dim)]">Second login</span>
           <input
-            aria-label="Label for the second Amex login"
+            aria-label="Label for the second login"
             value={bLabel}
             onChange={(e) => setBLabel(e.target.value)}
             className="w-36 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm"
@@ -793,7 +827,7 @@ function LoginLabelsForm({
         </button>
       </div>
       <p className="mt-1 text-xs text-[var(--dim)]">
-        Labels shown on each card for the two Amex logins (for example, two people in a household).
+        Labels shown on each card for the two logins (for example, two people in a household).
       </p>
       {msg && <p className="mt-2 text-sm text-[var(--dim)]">{msg}</p>}
     </form>
@@ -811,19 +845,25 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
     mutationFn: (id: number) => api.updateCredit({ id, active: true }),
     onSuccess: onChanged,
   });
-  // Cards grouped by Amex login (master account), one section per login.
-  // The group labels come from the dashboard data (the login-label
-  // settings), never from hardcoded names.
-  const ownerGroups: { owner: string | null; label: string; accounts: Dashboard["accounts"] }[] = [];
-  for (const lbl of data.ownerLabels) {
-    const list = data.accounts.filter((a) => a.owner === lbl);
-    if (list.length > 0) ownerGroups.push({ owner: lbl, label: `${lbl}'s Amex login`, accounts: list });
-  }
-  const unidentified = data.accounts.filter(
-    (a) => a.owner == null || !data.ownerLabels.includes(a.owner),
+  // Cards grouped by issuer, then by login (master account) within each
+  // issuer — "Alex's Amex login" and "Alex's Chase login" are separate
+  // sections. The group labels come from the dashboard data (the
+  // login-label settings), never from hardcoded names.
+  const cardGroups: { label: string; accounts: Dashboard["accounts"] }[] = [];
+  const issuers = [...new Set(data.accounts.map((a) => a.issuer))].sort(
+    (x, y) => (x === "Amex" ? 0 : 1) - (y === "Amex" ? 0 : 1),
   );
-  if (unidentified.length > 0) {
-    ownerGroups.push({ owner: null, label: "Login not identified yet", accounts: unidentified });
+  for (const issuer of issuers) {
+    for (const lbl of data.ownerLabels) {
+      const list = data.accounts.filter((a) => a.issuer === issuer && a.owner === lbl);
+      if (list.length > 0) cardGroups.push({ label: `${lbl}'s ${issuer} login`, accounts: list });
+    }
+    const unidentified = data.accounts.filter(
+      (a) => a.issuer === issuer && (a.owner == null || !data.ownerLabels.includes(a.owner as string)),
+    );
+    if (unidentified.length > 0) {
+      cardGroups.push({ label: `${issuer} login not identified yet`, accounts: unidentified });
+    }
   }
   return (
     <section aria-label="Cards" className="mt-5 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
@@ -840,7 +880,7 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
       {open && (
         <div className="border-t border-[var(--border)]">
           <LoginLabelsForm key={data.ownerLabels.join("|")} labels={data.ownerLabels} onChanged={onChanged} />
-          {ownerGroups.map((grp) => (
+          {cardGroups.map((grp) => (
             <div key={grp.label}>
               <div className="border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
                 {grp.label} ({grp.accounts.filter((a) => !a.ignored).length} tracked)
