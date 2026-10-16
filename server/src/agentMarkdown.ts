@@ -11,16 +11,37 @@ import type { DashboardData } from "./actions";
 
 type Credit = DashboardData["credits"][number];
 
-/** Plain dollar amount: $50, $20.50, $1,234 — never $50.00. */
-export function money(n: number): string {
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  CNY: "¥",
+  AUD: "A$",
+  CAD: "C$",
+  HKD: "HK$",
+  SGD: "S$",
+  CHF: "CHF ",
+};
+
+/**
+ * Plain amount in the account's currency: $50, $20.50, $1,234 — never
+ * $50.00. USD (the default) renders exactly as it always has; other ISO
+ * currencies use their symbol or code. Negatives (clawback postings)
+ * render -$50.
+ */
+export function money(n: number, currency: string = "USD"): string {
   const rounded = Math.round(n * 100) / 100;
-  const body = Number.isInteger(rounded)
-    ? rounded.toLocaleString("en-US")
-    : rounded.toLocaleString("en-US", {
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
+  const body = Number.isInteger(abs)
+    ? abs.toLocaleString("en-US")
+    : abs.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
-  return `$${body}`;
+  const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()] ?? `${currency.toUpperCase()} `;
+  return `${sign}${symbol}${body}`;
 }
 
 function statusOf(c: Credit): string {
@@ -28,11 +49,16 @@ function statusOf(c: Credit): string {
   return c.currentUsed > 0 ? "partially used" : "available";
 }
 
-/** "Alex · Hilton Honors Aspire Card ··1111" (owner / mask omitted when absent). */
+/**
+ * "Alex · Hilton Honors Aspire Card ··1111" (owner / mask omitted when
+ * absent). When the user has set an account nickname (the short prefix
+ * the dashboard rows carry, e.g. "UA"), it stands in for the product
+ * name: "Na · UA ··6151".
+ */
 function cardLabel(c: Credit): string {
   const parts: string[] = [];
   if (c.owner) parts.push(c.owner);
-  parts.push(c.accountName);
+  parts.push(c.accountNickname !== "" ? c.accountNickname : c.accountName);
   return c.mask ? `${parts.join(" · ")} ··${c.mask}` : parts.join(" · ");
 }
 
@@ -43,8 +69,9 @@ function creditBlock(c: Credit): string {
       ? "ends today"
       : `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} left`;
   lines.push(`- Period: ${c.periodStart} to ${c.periodEnd} (${c.periodLabel}) · ${days}`);
+  const cur = c.currency ?? "USD";
   lines.push(
-    `- ${money(c.amount)} credit · ${money(c.currentUsed)} used · ${money(c.currentRemaining)} remaining · ${statusOf(c)}`,
+    `- ${money(c.amount, cur)} credit · ${money(c.currentUsed, cur)} used · ${money(c.currentRemaining, cur)} remaining · ${statusOf(c)}`,
   );
   if (!c.enrolled) lines.push("- Enrollment: not enrolled yet — enroll before using");
   // The catalog fact that this benefit requires enrollment at all (as
@@ -60,12 +87,87 @@ function creditBlock(c: Credit): string {
     for (const p of c.currentPostings) {
       const src = p.source === "manual" ? "manual entry" : "Plaid";
       const posted = p.postedDate !== p.date ? ` · posted ${p.postedDate}` : "";
-      lines.push(`  - ${p.date} "${p.name}" ${money(p.amount)} (${src})${posted}`);
+      lines.push(`  - ${p.date} "${p.name}" ${money(p.amount, cur)} (${src})${posted}`);
     }
   } else {
     lines.push("- Postings this period: none yet");
   }
   return lines.join("\n");
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * The "needs your decision" list: every place the dashboard is running
+ * on an assumption the user has not confirmed — a catalog-default
+ * anniversary anchor, a suspected duplicate account, an enrollment that
+ * was never marked done, a login whose owner was never identified. An
+ * assistant reading this export should RAISE these with the user rather
+ * than silently trusting the affected numbers.
+ */
+export function warningLines(data: DashboardData): string[] {
+  const lines: string[] = [];
+  for (const c of data.credits) {
+    if (c.anchorMonth != null && c.anchorDay != null && !c.anchorConfirmed) {
+      lines.push(
+        `- Anchor not confirmed: ${c.name} — ${cardLabel(c)} is using the catalog-default ` +
+          `anniversary anchor (${MONTH_NAMES[c.anchorMonth - 1]} ${c.anchorDay}). If the card's ` +
+          "real anniversary differs, its period — and everything computed from it — is wrong. " +
+          "Confirm or correct the anchor on the credit (Edit) in the dashboard.",
+      );
+    }
+  }
+  const accountById = new Map(data.accounts.map((a) => [a.id, a]));
+  for (const a of data.accounts) {
+    if (!a.suspectedDuplicate) continue;
+    const others = a.duplicateSuspectIds
+      .map((id) => accountById.get(id))
+      .filter((o): o is NonNullable<typeof o> => o != null)
+      .map((o) => `${o.name}${o.mask ? ` ··${o.mask}` : ""}`)
+      .join("; ");
+    lines.push(
+      `- Possible duplicate account: ${a.name}${a.mask ? ` ··${a.mask}` : ""} may be the same ` +
+        `underlying card as ${others}. It is still counted in every total. If it is a ` +
+        "supplementary/duplicate record, mark it ignored in the Cards section; if it is a " +
+        "genuinely separate card, no action is needed.",
+    );
+  }
+  for (const c of data.credits) {
+    if (c.active && c.enrollmentRequired && !c.enrolled) {
+      lines.push(
+        `- Enrollment required, not marked enrolled: ${c.name} — ${cardLabel(c)}. ` +
+          "Purchases do not count toward this credit until the card is enrolled with the issuer.",
+      );
+    }
+  }
+  for (const a of data.accounts) {
+    if (!a.ignored && a.owner == null) {
+      lines.push(
+        `- Login not identified yet: ${a.name}${a.mask ? ` ··${a.mask}` : ""} has no owner ` +
+          "attribution. Set its owner in the Cards section so its credits group under the right person.",
+      );
+    }
+  }
+  return lines;
+}
+
+/** Every imported account, so cards with no tracked credits are visible too. */
+function accountLines(data: DashboardData): string[] {
+  if (data.accounts.length === 0) return ["- No accounts imported yet."];
+  return data.accounts.map((a) => {
+    const parts: string[] = [];
+    if (a.owner) parts.push(a.owner);
+    parts.push(a.name);
+    let line = `- ${parts.join(" · ")}${a.mask ? ` ··${a.mask}` : ""}`;
+    if (a.nickname !== "") line += ` — shown as "${a.nickname}"`;
+    if (a.ignored) line += " — ignored (you marked it a duplicate / not tracked)";
+    else if (a.creditCount === 0) line += " — no supported credits tracked";
+    if (a.suspectedDuplicate) line += " — possible duplicate (see Warnings)";
+    return line;
+  });
 }
 
 export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): string {
@@ -116,6 +218,18 @@ export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): str
     );
   }
   out.push("");
+  // Decisions the user still owes: the dashboard must surface its own
+  // unconfirmed assumptions instead of letting an assistant (or the
+  // user) trust numbers built on them.
+  out.push("## Warnings — needs your decision");
+  out.push("");
+  const warnings = warningLines(data);
+  if (warnings.length > 0) {
+    out.push(...warnings);
+  } else {
+    out.push("- Nothing needs your attention.");
+  }
+  out.push("");
   // Credits hidden by the display-exclusion preference never appear above
   // and never count in the totals — but an assistant managing the user's
   // credits has to know they exist (and that it can re-enable them via the
@@ -163,5 +277,9 @@ export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): str
       out.push("");
     }
   }
+  out.push("## Accounts");
+  out.push("");
+  out.push(...accountLines(data));
+  out.push("");
   return `${out.join("\n").trimEnd()}\n`;
 }

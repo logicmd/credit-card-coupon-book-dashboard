@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { addDays, Actions, periodBounds, type DashboardData } from "../server/src/actions";
-import { renderAgentMarkdown } from "../server/src/agentMarkdown";
+import { money, renderAgentMarkdown } from "../server/src/agentMarkdown";
 import { createTestDb, fakeCtx, todayLA } from "./helpers";
 import { ALEX_ASPIRE, SAM_ASPIRE } from "./fixtures/sample";
 
@@ -26,6 +26,9 @@ function credit(overrides: Partial<Credit>): Credit {
     period: "monthly",
     anchorMonth: null,
     anchorDay: null,
+    anchorConfirmed: true,
+    accountNickname: "",
+    currency: "USD",
     enrolled: true,
     enrollmentRequired: false,
     enrollmentNote: null,
@@ -316,5 +319,82 @@ describe("getAgentMarkdown action", () => {
     expect(md).toContain(`used up · renews ${renews}`);
     expect(md.indexOf("Flight Credit — Sam")).toBeLessThan(md.indexOf("## Used up"));
     expect(md.indexOf("## Used up")).toBeLessThan(md.indexOf("Flight Credit — Alex"));
+  });
+});
+
+describe("renderAgentMarkdown — warnings, accounts, currency", () => {
+  test("money formats USD as before and other currencies by symbol/code", () => {
+    expect(money(50)).toBe("$50");
+    expect(money(20.5)).toBe("$20.50");
+    expect(money(-50)).toBe("-$50"); // clawback postings
+    expect(money(50, "EUR")).toBe("€50");
+    expect(money(50, "TWD")).toBe("TWD 50");
+  });
+
+  test("a clean dashboard warns about nothing and still lists accounts", () => {
+    const data = sampleDashboard();
+    data.accounts = [
+      {
+        id: 1, name: "Business Platinum Card®", mask: "3333", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 3, suspectedDuplicate: false, duplicateSuspectIds: [],
+      },
+      {
+        id: 9, name: "Some Unsupported Card", mask: "0000", owner: "Sam",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 0, suspectedDuplicate: false, duplicateSuspectIds: [],
+      },
+    ] as any;
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("## Warnings — needs your decision");
+    // The sample's Hilton Credit is enrollment-required and not
+    // enrolled — that IS a warning; everything else is clean.
+    expect(md).toContain("Enrollment required, not marked enrolled: Hilton Credit");
+    expect(md).not.toContain("Anchor not confirmed");
+    expect(md).not.toContain("Possible duplicate account");
+    expect(md).not.toContain("Login not identified yet");
+    // Accounts section: every account is visible; the unsupported one
+    // is named as having no supported credits tracked.
+    expect(md).toContain("## Accounts");
+    expect(md).toContain("Some Unsupported Card ··0000 — no supported credits tracked");
+  });
+
+  test("unconfirmed anchors, suspected duplicates, and unidentified logins all warn", () => {
+    const data = sampleDashboard();
+    const sapphire = data.credits.find((c) => c.name === "Annual Hotel Credit")!;
+    sapphire.anchorConfirmed = false;
+    data.accounts = [
+      {
+        id: 1, name: "Business Platinum Card®", mask: "3333", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 3, suspectedDuplicate: true, duplicateSuspectIds: [2],
+      },
+      {
+        id: 2, name: "Business Platinum Card®", mask: "3333", owner: null,
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 3, suspectedDuplicate: true, duplicateSuspectIds: [1],
+      },
+    ] as any;
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("Anchor not confirmed: Annual Hotel Credit");
+    expect(md).toContain("catalog-default anniversary anchor (May 1)");
+    expect(md).toContain("Possible duplicate account: Business Platinum Card® ··3333");
+    expect(md).toContain("Login not identified yet: Business Platinum Card® ··3333");
+  });
+
+  test("a nickname stands in for the product name in credit labels", () => {
+    const data = sampleDashboard();
+    const flight = data.credits.find((c) => c.name === "Flight Credit")!;
+    flight.accountNickname = "Asp2";
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("### Flight Credit — Sam · Asp2 ··2222");
+  });
+
+  test("non-USD credits render amounts in their currency", () => {
+    const data = sampleDashboard();
+    const flight = data.credits.find((c) => c.name === "Flight Credit")!;
+    flight.currency = "EUR";
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("€50 credit · €20 used · €30 remaining");
   });
 });

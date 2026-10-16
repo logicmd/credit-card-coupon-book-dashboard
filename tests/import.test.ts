@@ -431,3 +431,34 @@ describe("importSnapshot — signed amounts (clawbacks) and strict dates", () =>
     expect(rows[0]!.currency).toBe("USD");
   });
 });
+
+describe("importSnapshot — seeded defaults are truthful, never assumed", () => {
+  test("enrollment-required credits seed as NOT enrolled; automatic ones seed enrolled", async () => {
+    const db = createTestDb();
+    await Actions.importSnapshot.handler(fakeCtx(db), JANUARY_SNAPSHOT as any);
+    const credits = await db.select().from(schema.credits);
+    // Business Platinum's Hilton Credit requires Hilton for Business
+    // enrollment — unknown state must not read as enrolled.
+    const hilton = credits.find((c) => c.name === "Hilton Credit")!;
+    expect(hilton.enrolled).toBe(0);
+    // Airline Fee Credit is also enrollment-gated (airline selection).
+    const airline = credits.find((c) => c.name === "Airline Fee Credit")!;
+    expect(airline.enrolled).toBe(0);
+    // Automatic credits keep the historical default.
+    const flight = credits.find((c) => c.name === "Flight Credit")!;
+    expect(flight.enrolled).toBe(1);
+  });
+
+  test("a catalog-default anchor seeds UNCONFIRMED; anchorless credits seed confirmed", async () => {
+    const db = createTestDb();
+    await Actions.importSnapshot.handler(fakeCtx(db), JANUARY_SNAPSHOT as any);
+    const credits = await db.select().from(schema.credits);
+    // The Aspire Resort Credit carries the placeholder May 1 anchor.
+    const resort = credits.find((c) => c.name === "Hilton Resort Credit")!;
+    expect(resort.anchorMonth).toBe(5);
+    expect(resort.anchorConfirmed).toBe(0);
+    const flight = credits.find((c) => c.name === "Flight Credit")!;
+    expect(flight.anchorMonth).toBeNull();
+    expect(flight.anchorConfirmed).toBe(1);
+  });
+});

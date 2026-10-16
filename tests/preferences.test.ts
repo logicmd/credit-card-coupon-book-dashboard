@@ -281,3 +281,27 @@ describe("exclusion preference — changes via the actions", () => {
     expect(prefs.excludedCredits).toEqual([...DEFAULT_EXCLUDED_PATTERNS]);
   });
 });
+
+describe("setExcludedCredits — canonical entries only", () => {
+  test("fragments that would hide nearly everything are rejected", async () => {
+    const { ctx } = await seedBizPlatWithHiddenCredit();
+    // "credit" is a substring of almost every credit name; "air" hits
+    // Airline Fee Credit and more. Neither is a canonical entry.
+    await expect(
+      Actions.setExcludedCredits.handler(ctx, { excludedCredits: ["credit"] }),
+    ).rejects.toThrow("unknown credit name");
+    await expect(
+      Actions.setExcludedCredits.handler(ctx, { excludedCredits: ["air"] }),
+    ).rejects.toThrow("unknown credit name");
+    // Canonical entries — a family pattern, a family label, and a full
+    // credit name — are all accepted.
+    const res: any = await Actions.setExcludedCredits.handler(ctx, {
+      excludedCredits: ["chatgpt", "Global Entry Credit", "ChatGPT Business Credit"],
+    });
+    expect(res.excludedCredits).toEqual([
+      "chatgpt",
+      "global entry credit",
+      "chatgpt business credit",
+    ]);
+  });
+});

@@ -126,3 +126,32 @@ describe("Chase import — issuer, catalog seeding, anchored periods", () => {
     expect(dash.unassigned).toHaveLength(0);
   });
 });
+
+describe("Chase import — seeded anchor confirmation state", () => {
+  test("the Sapphire catalog anchor (May 1) seeds unconfirmed and surfaces in the dashboard payload", async () => {
+    const db = createTestDb();
+    await importChase(db);
+    const stored = (await db.select().from(schema.credits)).find(
+      (c) => c.name === "Annual Hotel Credit",
+    )!;
+    expect(stored.anchorMonth).toBe(5);
+    expect(stored.anchorConfirmed).toBe(0);
+
+    const dash: any = await Actions.getDashboard.handler(fakeCtx(db), {});
+    const hotel = dash.credits.find((c: any) => c.name === "Annual Hotel Credit");
+    expect(hotel.anchorConfirmed).toBe(false);
+    // The Ritz travel credit has no anchor: nothing to confirm.
+    const ritz = dash.credits.find((c: any) => c.name === "Travel Credit");
+    expect(ritz.anchorConfirmed).toBe(true);
+
+    // Confirming via updateCredit flips the stored flag.
+    await Actions.updateCredit.handler(fakeCtx(db), {
+      id: stored.id,
+      anchorConfirmed: true,
+    });
+    const after = (await db.select().from(schema.credits)).find(
+      (c) => c.id === stored.id,
+    )!;
+    expect(after.anchorConfirmed).toBe(1);
+  });
+});

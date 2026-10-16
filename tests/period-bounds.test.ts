@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addDays, daysBetween, laDateOf, periodBounds } from "../server/src/actions";
+import { addDays, dateInTimeZone, daysBetween, isValidCalendarDate, laDateOf, periodBounds } from "../server/src/actions";
 
 describe("periodBounds — monthly", () => {
   test("mid-month date gives the calendar month", () => {
@@ -178,5 +178,65 @@ describe("laDateOf", () => {
 
   test("returns null for unparseable input", () => {
     expect(laDateOf("not a date")).toBe(null);
+  });
+});
+
+describe("periodBounds — anchored semiannual (cardmember-year halves)", () => {
+  // The Hilton Aspire Resort Credit runs on two 6-month halves of the
+  // CARDMEMBER year, not calendar halves. With a May 1 anchor the
+  // halves are May–Oct and Nov–Apr.
+  const MAY1 = { month: 5, day: 1 };
+
+  test("a date in the first anchored half gets May–Oct bounds", () => {
+    const b = periodBounds("semiannual", "2026-08-15", MAY1);
+    expect(b.start).toBe("2026-05-01");
+    expect(b.end).toBe("2026-10-31");
+    expect(addDays(b.end, 1)).toBe("2026-11-01");
+  });
+
+  test("a date in the second anchored half gets Nov–Apr bounds across the year turn", () => {
+    const b = periodBounds("semiannual", "2027-02-10", MAY1);
+    expect(b.start).toBe("2026-11-01");
+    expect(b.end).toBe("2027-04-30");
+    expect(addDays(b.end, 1)).toBe("2027-05-01");
+  });
+
+  test("the anchor day itself starts a new half", () => {
+    const b = periodBounds("semiannual", "2026-11-01", MAY1);
+    expect(b.start).toBe("2026-11-01");
+  });
+
+  test("without an anchor, semiannual stays calendar halves (unchanged)", () => {
+    const b = periodBounds("semiannual", "2026-08-15");
+    expect(b.start).toBe("2026-07-01");
+    expect(b.end).toBe("2026-12-31");
+  });
+});
+
+describe("isValidCalendarDate — strict real dates", () => {
+  test("accepts real dates, including leap day", () => {
+    expect(isValidCalendarDate("2026-10-16")).toBe(true);
+    expect(isValidCalendarDate("2024-02-29")).toBe(true);
+  });
+
+  test("rejects impossible dates instead of rolling them over", () => {
+    expect(isValidCalendarDate("2026-13-40")).toBe(false);
+    expect(isValidCalendarDate("2026-02-30")).toBe(false);
+    expect(isValidCalendarDate("2025-02-29")).toBe(false);
+    expect(isValidCalendarDate("2026-00-10")).toBe(false);
+  });
+
+  test("rejects non-date shapes", () => {
+    expect(isValidCalendarDate("2026-1-5")).toBe(false);
+    expect(isValidCalendarDate("10/16/2026")).toBe(false);
+    expect(isValidCalendarDate("")).toBe(false);
+  });
+});
+
+describe("dateInTimeZone — the same instant, different calendar days", () => {
+  test("a UTC-evening instant is already tomorrow in Auckland but still today in Los Angeles", () => {
+    const iso = "2026-01-01T11:30:00Z";
+    expect(dateInTimeZone(iso, "Pacific/Auckland")).toBe("2026-01-02");
+    expect(dateInTimeZone(iso, "America/Los_Angeles")).toBe("2026-01-01");
   });
 });
