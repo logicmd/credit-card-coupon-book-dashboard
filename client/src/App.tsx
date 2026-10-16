@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SafeAreaTopScrim } from "@hatch/space-sdk/client";
 import { api, type ApiResponse } from "./api";
 import { groupCredits, type CreditGroup } from "./grouping";
+import { SHARE_PROMPT } from "./sharePrompt";
 
 type Dashboard = ApiResponse<typeof api, "getDashboard">;
 type Credit = Dashboard["credits"][number];
@@ -184,6 +185,20 @@ export function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Share: a fixed prompt (SHARE_PROMPT) a friend pastes into their own
+  // Muse to build their own private dashboard from the public repo. It
+  // carries none of this instance's data — it shares the product, not access.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const copySharePrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(SHARE_PROMPT);
+      setShareCopied(true);
+    } catch {
+      setShareCopied(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
@@ -202,6 +217,18 @@ export function App() {
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              aria-label="Share this dashboard with a friend"
+              aria-expanded={shareOpen}
+              onClick={() => {
+                setShareOpen((v) => !v);
+                setShareCopied(false);
+              }}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm font-medium"
+            >
+              Share
+            </button>
             <button
               type="button"
               aria-label="Get agent markdown snapshot"
@@ -274,6 +301,36 @@ export function App() {
               One markdown file with everything on this page — paste it to your AI assistant to discuss what to use next.
             </p>
             <pre className="max-h-96 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-xs leading-relaxed">{agentMd}</pre>
+          </section>
+        )}
+
+        {shareOpen && (
+          <section aria-label="Share this dashboard" className="mb-5 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
+              <span className="text-base font-medium">Share this dashboard</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  aria-label="Copy share prompt to clipboard"
+                  onClick={() => void copySharePrompt()}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  {shareCopied ? "Copied ✓" : "Copy prompt"}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close share panel"
+                  onClick={() => setShareOpen(false)}
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <p className="px-4 pt-3 text-sm text-[var(--dim)]">
+              Send this prompt to a friend — they paste it into their own Muse and get their own private dashboard built from the open-source repo, connected to their own cards. It gives them no access to your data.
+            </p>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-xs leading-relaxed">{SHARE_PROMPT}</pre>
           </section>
         )}
 
