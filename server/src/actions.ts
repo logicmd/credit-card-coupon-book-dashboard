@@ -790,7 +790,12 @@ const creditView = z.object({
    * anniversary. Catalog-default anchors start unconfirmed and warn.
    */
   anchorConfirmed: z.boolean(),
-  enrolled: z.boolean(),
+  /**
+   * The user's asserted enrollment state: true / false once the user has
+   * marked it, null while UNCONFIRMED. The app cannot observe the issuer's
+   * enrollment state, so null must never be rendered as "not enrolled".
+   */
+  enrolled: z.boolean().nullable(),
   /**
    * Catalog fact: the issuer requires enrolling in this benefit before
    * use. Independent of the row's `enrolled` state above.
@@ -1001,11 +1006,13 @@ function synthesizedRow(inst: SynthesizedInstance): CreditRow {
     anchorMonth: d.anchorMonth ?? null,
     anchorDay: d.anchorDay ?? null,
     // Catalog-default anchors start unconfirmed; enrollment-required
-    // benefits start NOT enrolled (never assume either).
+    // benefits start UNCONFIRMED (enrolledAsserted 0 — never assume either
+    // enrolled or not enrolled).
     anchorConfirmed: d.anchorMonth != null ? 0 : 1,
     deleted: 0,
     matchPattern: d.pattern,
     enrolled: d.enrollmentRequired ? 0 : 1,
+    enrolledAsserted: 0,
     active: 1,
     note: d.note ?? "",
     sortOrder: 10000 + inst.defIndex,
@@ -1027,6 +1034,7 @@ function defRowValues(accountId: number, d: CreditDef, sortOrder: number) {
     anchorDay: d.anchorDay ?? null,
     anchorConfirmed: d.anchorMonth != null ? 0 : 1,
     enrolled: d.enrollmentRequired ? 0 : 1,
+    enrolledAsserted: 0,
     matchPattern: d.pattern,
     note: d.note ?? "",
     sortOrder,
@@ -1271,7 +1279,7 @@ async function computeDashboard(
             anchorMonth: c.anchorMonth,
             anchorDay: c.anchorDay,
             anchorConfirmed: c.anchorConfirmed === 1,
-            enrolled: c.enrolled === 1,
+            enrolled: (c.enrolledAsserted ?? 0) === 1 ? c.enrolled === 1 : null,
             enrollmentRequired: enrollment.required,
             enrollmentNote: enrollment.note,
             active: effectiveActive,
@@ -1704,7 +1712,7 @@ export const Actions = {
         if (!defs) continue;
         // Seeded rows start truthful: catalog-default anchors are
         // UNCONFIRMED placeholders, and enrollment-required benefits
-        // start NOT enrolled (defRowValues carries both rules).
+        // start enrollment-UNCONFIRMED (defRowValues carries both rules).
         const rows: (typeof schema.credits.$inferInsert)[] = defs.map((d, i) =>
           defRowValues(acct.id, d, i),
         );
@@ -2166,7 +2174,8 @@ export const Actions = {
       anchorDay: z.number().int().min(1).max(31).nullable().optional(),
       /** Mark the anchor confirmed (or back to unconfirmed) without changing it. */
       anchorConfirmed: z.boolean().optional(),
-      enrolled: z.boolean().optional(),
+      /** Assert enrollment (true/false), or null to clear back to unconfirmed. */
+      enrolled: z.boolean().nullable().optional(),
       active: z.boolean().optional(),
       note: z.string().optional(),
       matchPattern: z.string().optional(),
@@ -2206,7 +2215,16 @@ export const Actions = {
       if (args.anchorConfirmed !== undefined) {
         patch.anchorConfirmed = args.anchorConfirmed ? 1 : 0;
       }
-      if (args.enrolled !== undefined) patch.enrolled = args.enrolled ? 1 : 0;
+      if (args.enrolled !== undefined) {
+        if (args.enrolled === null) {
+          // Clearing the assertion returns the row to UNCONFIRMED — the app
+          // never claims an enrollment state the user did not assert.
+          patch.enrolledAsserted = 0;
+        } else {
+          patch.enrolled = args.enrolled ? 1 : 0;
+          patch.enrolledAsserted = 1;
+        }
+      }
       if (args.active !== undefined) patch.active = args.active ? 1 : 0;
       if (args.note !== undefined) patch.note = args.note;
       if (args.matchPattern !== undefined) patch.matchPattern = args.matchPattern;
@@ -2256,6 +2274,7 @@ export const Actions = {
         // An anchor the user typed in themselves is confirmed by definition.
         anchorConfirmed: 1,
         enrolled: enrollment.required ? 0 : 1,
+        enrolledAsserted: 0,
         note: args.note,
         matchPattern: args.matchPattern,
         sortOrder: 100,

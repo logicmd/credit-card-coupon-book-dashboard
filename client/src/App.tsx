@@ -546,9 +546,14 @@ function CreditRow({
               {!nested && <PrefixChip label={prefixFor(c)} />}
               {nested ? cardLabel(c.owner, c.accountName, c.mask, c.fifthDigit) : c.name}
               <OwnerBadge owner={c.owner} />
-              {!c.enrolled && (
+              {c.enrolled === false && (
                 <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
                   not enrolled
+                </span>
+              )}
+              {c.enrolled === null && c.enrollmentRequired && (
+                <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
+                  enrollment unconfirmed
                 </span>
               )}
               {anchorUnconfirmed && (
@@ -629,11 +634,21 @@ function CreditRow({
             <button
               type="button"
               aria-label={`Mark ${c.name} as ${c.enrolled ? "not enrolled" : "enrolled"}`}
-              onClick={() => toggleEnrolled.mutate(!c.enrolled)}
+              onClick={() => toggleEnrolled.mutate(c.enrolled !== true)}
               className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
             >
-              {c.enrolled ? "Enrolled ✓" : "Mark enrolled"}
+              {c.enrolled === true ? "Enrolled ✓" : "Mark enrolled"}
             </button>
+            {c.enrolled === null && (
+              <button
+                type="button"
+                aria-label={`Mark ${c.name} as not enrolled`}
+                onClick={() => toggleEnrolled.mutate(false)}
+                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm"
+              >
+                Mark not enrolled
+              </button>
+            )}
             <button
               type="button"
               aria-label={`${editing ? "Close" : "Edit"} settings for ${c.name}`}
@@ -696,6 +711,11 @@ function GroupRow({
               {g.notEnrolled > 0 && (
                 <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
                   not enrolled on {g.notEnrolled}
+                </span>
+              )}
+              {g.enrollmentUnconfirmed > 0 && (
+                <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
+                  enrollment unconfirmed on {g.enrollmentUnconfirmed}
                 </span>
               )}
             </div>

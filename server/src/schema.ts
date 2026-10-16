@@ -97,7 +97,15 @@ export const credits = sqliteTable("credits", {
   deleted: integer("deleted").notNull().default(0),
   /** Lowercase substring matched against Plaid posting names for auto-mapping. */
   matchPattern: text("match_pattern").notNull().default(""),
+  /**
+   * The user's asserted enrollment state (1 = enrolled, 0 = not enrolled).
+   * Meaningful ONLY when enrolledAsserted is 1: the app cannot observe the
+   * issuer's enrollment state, so an un-asserted row is UNKNOWN — it must
+   * never be displayed or exported as "not enrolled".
+   */
   enrolled: integer("enrolled").notNull().default(1),
+  /** 1 once the user has explicitly marked this row enrolled or not enrolled. */
+  enrolledAsserted: integer("enrolled_asserted").notNull().default(0),
   active: integer("active").notNull().default(1),
   note: text("note").notNull().default(""),
   sortOrder: integer("sort_order").notNull().default(0),

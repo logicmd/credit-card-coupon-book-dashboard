@@ -117,7 +117,11 @@ function creditBlock(c: Credit): string {
   lines.push(
     `- ${money(c.amount, cur)} credit · ${money(c.currentUsed, cur)} used · ${money(c.currentRemaining, cur)} remaining · ${statusOf(c)}`,
   );
-  if (!c.enrolled) lines.push("- Enrollment: not enrolled yet — enroll before using");
+  if (c.enrolled === null && c.enrollmentRequired)
+    lines.push(
+      "- Enrollment: unconfirmed — this app cannot see the issuer's enrollment state; enroll before using, or mark this credit enrolled if you already have",
+    );
+  if (c.enrolled === false) lines.push("- Enrollment: marked not enrolled — enroll before using");
   // The catalog fact that this benefit requires enrollment at all (as
   // opposed to the row's enrollment state above): an assistant must
   // never advise spending toward a credit that cannot pay out yet.
@@ -195,9 +199,15 @@ export function warningLines(data: DashboardData): string[] {
     );
   }
   for (const c of data.credits) {
-    if (c.active && c.enrollmentRequired && !c.enrolled) {
+    if (c.active && c.enrollmentRequired && c.enrolled === null) {
       lines.push(
-        `- Enrollment required, not marked enrolled: ${c.name} — ${cardLabel(c)}. ` +
+        `- Enrollment required, status unconfirmed: ${c.name} — ${cardLabel(c)}. ` +
+          "The app cannot see the issuer's enrollment state. If this card is enrolled, mark it enrolled; otherwise purchases do not count toward this credit until the card is enrolled with the issuer.",
+      );
+    }
+    if (c.active && c.enrollmentRequired && c.enrolled === false) {
+      lines.push(
+        `- Enrollment required, marked not enrolled: ${c.name} — ${cardLabel(c)}. ` +
           "Purchases do not count toward this credit until the card is enrolled with the issuer.",
       );
     }

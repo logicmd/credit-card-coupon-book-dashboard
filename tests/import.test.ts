@@ -471,20 +471,30 @@ describe("importSnapshot — signed amounts (clawbacks) and strict dates", () =>
 });
 
 describe("importSnapshot — seeded defaults are truthful, never assumed", () => {
-  test("enrollment-required credits seed as NOT enrolled; automatic ones seed enrolled", async () => {
+  test("enrollment-required credits seed UNCONFIRMED (never asserted either way)", async () => {
     const db = createTestDb();
     await Actions.importSnapshot.handler(fakeCtx(db), JANUARY_SNAPSHOT as any);
     const credits = await db.select().from(schema.credits);
     // Business Platinum's Hilton Credit requires Hilton for Business
-    // enrollment — unknown state must not read as enrolled.
+    // enrollment. The app cannot observe that state: the seed must be
+    // UNCONFIRMED (enrolledAsserted 0) so nothing downstream can render
+    // it as "not enrolled" — nor as enrolled.
     const hilton = credits.find((c) => c.name === "Hilton Credit")!;
     expect(hilton.enrolled).toBe(0);
+    expect(hilton.enrolledAsserted).toBe(0);
     // Airline Fee Credit is also enrollment-gated (airline selection).
     const airline = credits.find((c) => c.name === "Airline Fee Credit")!;
     expect(airline.enrolled).toBe(0);
-    // Automatic credits keep the historical default.
+    expect(airline.enrolledAsserted).toBe(0);
+    // Automatic credits keep the historical default value (their
+    // enrolled state is meaningless and likewise unasserted).
     const flight = credits.find((c) => c.name === "Flight Credit")!;
     expect(flight.enrolled).toBe(1);
+    expect(flight.enrolledAsserted).toBe(0);
+    // The dashboard DTO exposes the unconfirmed state as null.
+    const dash: any = await Actions.getDashboard.handler(fakeCtx(db), {});
+    const hiltonDto = dash.credits.find((c: any) => c.name === "Hilton Credit");
+    expect(hiltonDto.enrolled).toBeNull();
   });
 
   test("a catalog-default anchor seeds UNCONFIRMED; anchorless credits seed confirmed", async () => {

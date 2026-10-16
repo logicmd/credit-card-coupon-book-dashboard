@@ -61,22 +61,32 @@ describe("materialize-on-write — synthesized credits", () => {
     expect(after.note).toBe("Enrolled 2026-10-01");
   });
 
-  test("marking a synthesized enrollment-required credit enrolled persists (and starts un-enrolled)", async () => {
+  test("marking a synthesized enrollment-required credit enrolled persists (and starts unconfirmed)", async () => {
     const db = createTestDb();
     const ctx = await importAccounts(db, [ALEX_BIZ_GOLD]);
     await unhideChatgpt(ctx);
     const dash1: any = await Actions.getDashboard.handler(ctx, {});
     const chat = dash1.credits.find((c: any) => c.name === "ChatGPT Business Credit");
     expect(chat.id).toBeLessThan(0);
-    // Never assume enrollment: a synthesized instance of an
-    // enrollment-required def starts NOT enrolled.
-    expect(chat.enrolled).toBe(false);
+    // Never assume enrollment either way: a synthesized instance of an
+    // enrollment-required def starts UNCONFIRMED (null) — the app cannot
+    // know whether the holder enrolled with the issuer.
+    expect(chat.enrolled).toBeNull();
 
     await Actions.updateCredit.handler(ctx, { id: chat.id, enrolled: true });
     const dash2: any = await Actions.getDashboard.handler(ctx, {});
     const after = dash2.credits.find((c: any) => c.name === "ChatGPT Business Credit");
     expect(after.id).toBeGreaterThan(0);
     expect(after.enrolled).toBe(true);
+
+    // An explicit "not enrolled" assertion persists as false (distinct
+    // from unconfirmed), and clearing it returns to unconfirmed.
+    await Actions.updateCredit.handler(ctx, { id: after.id, enrolled: false });
+    const dash3: any = await Actions.getDashboard.handler(ctx, {});
+    expect(dash3.credits.find((c: any) => c.name === "ChatGPT Business Credit").enrolled).toBe(false);
+    await Actions.updateCredit.handler(ctx, { id: after.id, enrolled: null });
+    const dash4: any = await Actions.getDashboard.handler(ctx, {});
+    expect(dash4.credits.find((c: any) => c.name === "ChatGPT Business Credit").enrolled).toBeNull();
   });
 
   test("deleting a synthesized credit keeps it deleted", async () => {

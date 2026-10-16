@@ -1,0 +1,1 @@
+ALTER TABLE credits ADD COLUMN enrolled_asserted INTEGER NOT NULL DEFAULT 0;

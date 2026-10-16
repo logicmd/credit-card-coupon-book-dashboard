@@ -84,7 +84,7 @@ function sampleDashboard(): DashboardData {
       periodEnd: "2026-12-31",
       nextPeriodStart: "2027-01-01",
       daysLeft: 77,
-      enrolled: false,
+      enrolled: null,
       enrollmentRequired: true,
       enrollmentNote:
         "Enrollment required: enroll the card in Hilton for Business first — Hilton purchases count toward the credit only after enrollment",
@@ -219,7 +219,7 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("How to use: Flights booked directly with airlines or Amex Travel");
     expect(md).toContain("NOT automatic — request it via J.P. Morgan Priority Services");
     expect(md).toContain("How to use: Hotel bookings through Chase Travel only");
-    expect(md).toContain("Enrollment: not enrolled yet — enroll before using");
+    expect(md).toContain("Enrollment: unconfirmed — this app cannot see the issuer's enrollment state");
     // The catalog enrollment requirement is its own line in the credit's
     // detail — and only the marked credit (Hilton) carries it: the
     // unmarked credits (Wireless, Flight, hotel, …) must not grow one.
@@ -236,6 +236,16 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain('2026-03-05 "Manual entry" $100 (manual entry)');
     expect(md).toContain('2026-09-30 "Platinum Hotel Credit" $300 (Plaid) · posted 2026-10-02');
     expect(md).toContain("- Postings this period: none yet");
+  });
+
+  test("a credit the user marked NOT enrolled reads differently from an unconfirmed one", () => {
+    const data = sampleDashboard();
+    const hilton = data.credits.find((c: any) => c.name === "Hilton Credit") as any;
+    hilton.enrolled = false; // user-asserted, not a default
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("Enrollment required, marked not enrolled: Hilton Credit");
+    expect(md).toContain("Enrollment: marked not enrolled — enroll before using");
+    expect(md).not.toContain("status unconfirmed: Hilton Credit");
   });
 
   test("hidden-by-preference section names the excluded credits and the entries in force", () => {
@@ -348,9 +358,9 @@ describe("renderAgentMarkdown — warnings, accounts, currency", () => {
     ] as any;
     const md = renderAgentMarkdown(data, GENERATED_AT);
     expect(md).toContain("## Warnings — needs your decision");
-    // The sample's Hilton Credit is enrollment-required and not
-    // enrolled — that IS a warning; everything else is clean.
-    expect(md).toContain("Enrollment required, not marked enrolled: Hilton Credit");
+    // The sample's Hilton Credit is enrollment-required and its status
+    // is unconfirmed — that IS a warning; everything else is clean.
+    expect(md).toContain("Enrollment required, status unconfirmed: Hilton Credit");
     expect(md).not.toContain("Anchor not confirmed");
     expect(md).not.toContain("Possible duplicate account");
     expect(md).not.toContain("Login not identified yet");

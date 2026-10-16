@@ -15,6 +15,7 @@ function credit(overrides: Partial<GroupableCredit> = {}): GroupableCredit {
     currentRemaining: 50,
     owner: "Alex",
     enrolled: true,
+    enrollmentRequired: false,
     ...overrides,
   };
 }
@@ -79,6 +80,19 @@ describe("groupCredits — merging the same credit type across cards", () => {
     ]);
     expect(groups[0]!.daysLeft).toBe(12);
     expect(groups[0]!.notEnrolled).toBe(2);
+  });
+
+  test("unconfirmed (null) members count separately — and only for enrollment-required credits", () => {
+    const groups = groupCredits([
+      credit({ enrolled: null, enrollmentRequired: true }),
+      credit({ enrolled: null, enrollmentRequired: true }),
+      credit({ enrolled: false, enrollmentRequired: true }),
+    ]);
+    expect(groups[0]!.enrollmentUnconfirmed).toBe(2);
+    expect(groups[0]!.notEnrolled).toBe(1);
+    // A credit that needs no enrollment is never "unconfirmed".
+    const plain = groupCredits([credit({ enrolled: null, enrollmentRequired: false })]);
+    expect(plain[0]!.enrollmentUnconfirmed).toBe(0);
   });
 
   test("fractional amounts are rounded to cents after summing", () => {

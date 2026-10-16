@@ -18,7 +18,10 @@ export type GroupableCredit = {
   currentUsed: number;
   currentRemaining: number;
   owner: string | null;
-  enrolled: boolean;
+  /** true/false once the user asserted it; null while enrollment is unconfirmed. */
+  enrolled: boolean | null;
+  /** Catalog fact: this benefit pays out only after enrollment. */
+  enrollmentRequired: boolean;
 };
 
 export type CreditGroup<C extends GroupableCredit = GroupableCredit> = {
@@ -33,7 +36,10 @@ export type CreditGroup<C extends GroupableCredit = GroupableCredit> = {
   amount: number;
   used: number;
   remaining: number;
+  /** Members the user marked NOT enrolled. */
   notEnrolled: number;
+  /** Members whose enrollment state is unconfirmed (never asserted). */
+  enrollmentUnconfirmed: number;
   members: C[];
 };
 
@@ -52,7 +58,8 @@ export function groupCredits<C extends GroupableCredit>(credits: readonly C[]): 
       g.remaining += c.currentRemaining;
       g.daysLeft = Math.min(g.daysLeft, c.daysLeft);
       if (c.owner && !g.owners.includes(c.owner)) g.owners.push(c.owner);
-      if (!c.enrolled) g.notEnrolled += 1;
+      if (c.enrolled === false) g.notEnrolled += 1;
+      if (c.enrolled === null && c.enrollmentRequired) g.enrollmentUnconfirmed += 1;
     } else {
       byKey.set(key, {
         key,
@@ -65,7 +72,8 @@ export function groupCredits<C extends GroupableCredit>(credits: readonly C[]): 
         amount: c.amount,
         used: c.currentUsed,
         remaining: c.currentRemaining,
-        notEnrolled: c.enrolled ? 0 : 1,
+        notEnrolled: c.enrolled === false ? 1 : 0,
+        enrollmentUnconfirmed: c.enrolled === null && c.enrollmentRequired ? 1 : 0,
         members: [c],
       });
     }
