@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   catalogFor,
+  DEFAULT_ENROLLMENT_NOTE,
   DEFAULT_OWNER_LABELS,
+  enrollmentInfoFor,
   isExcludedName,
   isPinnedCredit,
   issuerForAccountName,
+  nonSeededDefsFor,
   ownerLabelFor,
 } from "../server/src/actions";
 
@@ -183,6 +186,81 @@ describe("isPinnedCredit — always-displayed credits", () => {
   test("other credits are not pinned", () => {
     expect(isPinnedCredit("Dining Credit")).toBe(false);
     expect(isPinnedCredit("Flight Credit")).toBe(false);
+  });
+});
+
+describe("enrollmentRequired — catalog metadata", () => {
+  // One representative account name per supported product.
+  const PRODUCTS = [
+    "Business Platinum Card®",
+    "Business Gold Card",
+    "The Platinum Card®",
+    "Hilton Honors Aspire Card",
+    "Marriott Bonvoy Brilliant® American Express® Card",
+    "Chase Sapphire Preferred®",
+    "World of Hyatt Business Credit Card",
+    "IHG One Rewards Premier Credit Card",
+    "The Ritz-Carlton® Credit Card",
+  ];
+
+  test("exactly the enrollment-based benefits are marked — no more, no fewer", () => {
+    const marked: string[] = [];
+    for (const product of PRODUCTS) {
+      const defs = [...(catalogFor(product) ?? []), ...nonSeededDefsFor(product)];
+      for (const d of defs) {
+        if (d.enrollmentRequired) marked.push(`${product} :: ${d.name}`);
+      }
+    }
+    expect(marked.sort()).toEqual(
+      [
+        // Business Platinum: the Hilton credit is gated on Hilton for
+        // Business enrollment.
+        "Business Platinum Card® :: Hilton Credit",
+        // ChatGPT Business: verified per-card enrollment on both
+        // business products that carry it.
+        "Business Platinum Card® :: ChatGPT Business Credit",
+        "Business Gold Card :: ChatGPT Business Credit",
+        // Personal Platinum benefits whose terms require enrollment
+        // (their catalog notes already said so).
+        "The Platinum Card® :: Resy Credit",
+        "The Platinum Card® :: Equinox Credit",
+        "The Platinum Card® :: Digital Entertainment Credit",
+        "The Platinum Card® :: Walmart+ Credit",
+      ].sort(),
+    );
+  });
+
+  test("automatic statement credits are not marked", () => {
+    for (const [product, credit] of [
+      ["Hilton Honors Aspire Card", "Flight Credit"],
+      ["Hilton Honors Aspire Card", "Hilton Resort Credit"],
+      ["Chase Sapphire Preferred®", "Annual Hotel Credit"],
+      ["Business Platinum Card®", "Dell Credit"],
+      ["Business Platinum Card®", "Airline Fee Credit"],
+      ["Business Platinum Card®", "Wireless Credit"],
+      ["Business Gold Card", "Flexible Business Credit"],
+      ["Marriott Bonvoy Brilliant® American Express® Card", "Dining Credit"],
+      // The Ritz travel credit is a manual claim, not an enrollment.
+      ["The Ritz-Carlton® Credit Card", "Travel Credit"],
+    ] as const) {
+      expect(enrollmentInfoFor(product, credit)).toEqual({ required: false, note: null });
+    }
+  });
+
+  test("enrollmentInfoFor resolves per-def notes and the generic fallback", () => {
+    const chatgpt = enrollmentInfoFor("Business Gold Card", "ChatGPT Business Credit");
+    expect(chatgpt.required).toBe(true);
+    expect(chatgpt.note).toContain("enrolled in the ChatGPT Business credit separately");
+    // Resy sets the flag without its own note → the generic notice.
+    expect(enrollmentInfoFor("The Platinum Card®", "Resy Credit")).toEqual({
+      required: true,
+      note: DEFAULT_ENROLLMENT_NOTE,
+    });
+    // A name no catalog def carries is not an enrollment benefit.
+    expect(enrollmentInfoFor("Business Gold Card", "Made-Up Credit")).toEqual({
+      required: false,
+      note: null,
+    });
   });
 });
 

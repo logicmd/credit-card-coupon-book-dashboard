@@ -265,3 +265,52 @@ describe("compute-time attribution — no leaks", () => {
     expect(dash.unassigned[0].name).toBe("FLEXIBLE BUSINESS CREDIT");
   });
 });
+
+describe("enrollment metadata — dashboard payload and Agent Markdown", () => {
+  test("enrollment-required credits carry the notice; automatic credits carry none", async () => {
+    const db = createTestDb();
+    const ctx = fakeCtx(db);
+    await importPostings(db, [SAM_BIZ_GOLD, ALEX_BIZ_PLAT], [
+      {
+        txnId: "fake-txn-flex-enroll",
+        accountPlaidId: SAM_BIZ_GOLD.plaidAccountId,
+        date: todayLA(),
+        name: "FLEXIBLE BUSINESS CREDIT",
+        amount: 20,
+      },
+    ]);
+    await unhideChatgpt(db);
+    const accounts = await db.select().from(schema.accounts);
+    const byPlaid = new Map(accounts.map((a) => [a.plaidAccountId, a]));
+    const goldId = byPlaid.get(SAM_BIZ_GOLD.plaidAccountId)!.id;
+    const platId = byPlaid.get(ALEX_BIZ_PLAT.plaidAccountId)!.id;
+
+    const dash: any = await Actions.getDashboard.handler(ctx, {});
+    // Synthesized instance: the ChatGPT credit reports its per-card
+    // enrollment requirement from the catalog def.
+    const chat = creditOn(dash, goldId, "ChatGPT Business Credit");
+    expect(chat.enrollmentRequired).toBe(true);
+    expect(chat.enrollmentNote).toContain(
+      "enrolled in the ChatGPT Business credit separately",
+    );
+    // Stored row: the Business Platinum Hilton Credit is seeded at
+    // import, and resolves the same metadata by catalog name.
+    const hilton = creditOn(dash, platId, "Hilton Credit");
+    expect(hilton.enrollmentRequired).toBe(true);
+    expect(hilton.enrollmentNote).toContain("Hilton for Business");
+    // Automatic statement credits carry no enrollment metadata.
+    const flex = creditOn(dash, goldId, "Flexible Business Credit");
+    expect(flex.enrollmentRequired).toBe(false);
+    expect(flex.enrollmentNote).toBeNull();
+    const dell = creditOn(dash, platId, "Dell Credit");
+    expect(dell.enrollmentRequired).toBe(false);
+    expect(dell.enrollmentNote).toBeNull();
+
+    // The Agent Markdown shows the same notices in the credit details.
+    const md: string = ((await Actions.getAgentMarkdown.handler(ctx, {})) as any).markdown;
+    expect(md).toContain(
+      "Enrollment required: each card must be enrolled in the ChatGPT Business credit separately",
+    );
+    expect(md).toContain("Enrollment required: enroll the card in Hilton for Business first");
+  });
+});

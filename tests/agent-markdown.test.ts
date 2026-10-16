@@ -27,6 +27,8 @@ function credit(overrides: Partial<Credit>): Credit {
     anchorMonth: null,
     anchorDay: null,
     enrolled: true,
+    enrollmentRequired: false,
+    enrollmentNote: null,
     active: true,
     note: "",
     matchPattern: "",
@@ -79,6 +81,9 @@ function sampleDashboard(): DashboardData {
       nextPeriodStart: "2027-01-01",
       daysLeft: 77,
       enrolled: false,
+      enrollmentRequired: true,
+      enrollmentNote:
+        "Enrollment required: enroll the card in Hilton for Business first — Hilton purchases count toward the credit only after enrollment",
       note: "Direct Hilton purchases; needs Hilton for Business enrollment",
     }),
     credit({
@@ -211,6 +216,13 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("NOT automatic — request it via J.P. Morgan Priority Services");
     expect(md).toContain("How to use: Hotel bookings through Chase Travel only");
     expect(md).toContain("Enrollment: not enrolled yet — enroll before using");
+    // The catalog enrollment requirement is its own line in the credit's
+    // detail — and only the marked credit (Hilton) carries it: the
+    // unmarked credits (Wireless, Flight, hotel, …) must not grow one.
+    expect(md).toContain(
+      "Enrollment required: enroll the card in Hilton for Business first — Hilton purchases count toward the credit only after enrollment",
+    );
+    expect(md.match(/^- Enrollment required:/gm)).toHaveLength(1);
     // Card identity: owner login label + product name + mask.
     expect(md).toContain("### Travel Credit — Alex · The Ritz-Carlton® Credit Card ··9999");
     expect(md).toContain("### Flight Credit — Sam · Hilton Honors Aspire Card ··2222");

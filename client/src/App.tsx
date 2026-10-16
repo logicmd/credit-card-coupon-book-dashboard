@@ -524,6 +524,9 @@ function CreditRow({
       {open && (
         <div className="mt-3 border-t border-[var(--border)] pt-3">
           {c.note && <p className="mb-2 text-sm text-[var(--dim)]">{c.note}</p>}
+          {c.enrollmentRequired && c.enrollmentNote && (
+            <p className="mb-2 text-sm font-medium text-[var(--warn)]">{c.enrollmentNote}</p>
+          )}
 
           {c.currentPostings.length > 0 ? (
             <ul className="mb-3 space-y-1">

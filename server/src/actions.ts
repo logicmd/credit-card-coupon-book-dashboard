@@ -24,6 +24,20 @@ type CreditDef = {
   pattern: string;
   note?: string;
   /**
+   * True when the issuer requires enrolling in the benefit before use:
+   * the credit pays out only after enrollment. This is a catalog fact
+   * about the benefit — distinct from the per-row `enrolled` state the
+   * user tracks — and it drives the enrollment notice in the credit's
+   * expanded detail (dashboard UI and Agent Markdown).
+   */
+  enrollmentRequired?: boolean;
+  /**
+   * The enrollment notice shown in the expanded detail when
+   * enrollmentRequired is true (a full sentence, starting with
+   * "Enrollment required:"). Falls back to DEFAULT_ENROLLMENT_NOTE.
+   */
+  enrollmentNote?: string;
+  /**
    * Anniversary anchor for annual credits (e.g. 5/1): the credit year runs
    * anchor-to-anchor instead of Jan 1 – Dec 31. Only meaningful with
    * period "annual".
@@ -34,7 +48,7 @@ type CreditDef = {
 
 const BIZ_PLAT: CreditDef[] = [
   { name: "Hotel Credit (FHR / Hotel Collection)", amount: 300, period: "semiannual", pattern: "hotel credit", note: "Prepaid FHR or The Hotel Collection via Amex Travel; Hotel Collection needs 2+ nights" },
-  { name: "Hilton Credit", amount: 50, period: "quarterly", pattern: "hilton", note: "Direct Hilton purchases; needs Hilton for Business enrollment" },
+  { name: "Hilton Credit", amount: 50, period: "quarterly", pattern: "hilton", note: "Direct Hilton purchases; needs Hilton for Business enrollment", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll the card in Hilton for Business first — Hilton purchases count toward the credit only after enrollment" },
   { name: "Dell Credit", amount: 150, period: "annual", pattern: "dell", note: "Plus $1,000 more after $5,000 of Dell spend in the year" },
   { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline" },
   { name: "Wireless Credit", amount: 10, period: "monthly", pattern: "wireless", note: "U.S. wireless provider paid directly — your mobile phone bill credit" },
@@ -42,7 +56,7 @@ const BIZ_PLAT: CreditDef[] = [
 
 const PERSONAL_PLAT: CreditDef[] = [
   { name: "Hotel Credit (FHR / Hotel Collection)", amount: 300, period: "semiannual", pattern: "hotel credit", note: "Prepaid FHR or The Hotel Collection via Amex Travel; Hotel Collection needs 2+ nights" },
-  { name: "Resy Credit", amount: 100, period: "quarterly", pattern: "resy", note: "U.S. Resy restaurants; enrollment required" },
+  { name: "Resy Credit", amount: 100, period: "quarterly", pattern: "resy", note: "U.S. Resy restaurants; enrollment required", enrollmentRequired: true },
   { name: "Lululemon Credit", amount: 75, period: "quarterly", pattern: "lululemon", note: "U.S. lululemon stores (excl. outlets) and online" },
   { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline" },
   { name: "Saks Credit", amount: 50, period: "semiannual", pattern: "saks", note: "Saks Fifth Avenue purchases" },
@@ -108,20 +122,20 @@ const RITZ_CARLTON: CreditDef[] = [
 // ---------------------------------------------------------------------------
 
 const BIZ_PLAT_NON_SEEDED: CreditDef[] = [
-  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately" },
+  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately", enrollmentRequired: true, enrollmentNote: "Enrollment required: each card must be enrolled in the ChatGPT Business credit separately — a card's credit only pays out after that card is enrolled" },
   { name: "Indeed Credit", amount: 200, period: "annual", pattern: "indeed", note: "U.S. purchases with Indeed" },
   { name: "Adobe Credit", amount: 150, period: "annual", pattern: "adobe", note: "Adobe Creative Cloud / Acrobat purchases" },
 ];
 
 const BIZ_GOLD_NON_SEEDED: CreditDef[] = [
-  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately" },
+  { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately", enrollmentRequired: true, enrollmentNote: "Enrollment required: each card must be enrolled in the ChatGPT Business credit separately — a card's credit only pays out after that card is enrolled" },
 ];
 
 const PERSONAL_PLAT_NON_SEEDED: CreditDef[] = [
   { name: "CLEAR+ Credit", amount: 209, period: "annual", pattern: "clear", note: "CLEAR+ membership charges" },
-  { name: "Equinox Credit", amount: 300, period: "annual", pattern: "equinox", note: "Equinox club memberships and the Equinox+ app; enrollment required" },
-  { name: "Digital Entertainment Credit", amount: 25, period: "monthly", pattern: "entertainment", note: "Monthly credit across the eligible streaming services; enrollment required" },
-  { name: "Walmart+ Credit", amount: 12.95, period: "monthly", pattern: "walmart", note: "Monthly Walmart+ membership fee; enrollment required" },
+  { name: "Equinox Credit", amount: 300, period: "annual", pattern: "equinox", note: "Equinox club memberships and the Equinox+ app; enrollment required", enrollmentRequired: true },
+  { name: "Digital Entertainment Credit", amount: 25, period: "monthly", pattern: "entertainment", note: "Monthly credit across the eligible streaming services; enrollment required", enrollmentRequired: true },
+  { name: "Walmart+ Credit", amount: 12.95, period: "monthly", pattern: "walmart", note: "Monthly Walmart+ membership fee; enrollment required", enrollmentRequired: true },
 ];
 
 /**
@@ -310,6 +324,33 @@ export function catalogFor(accountName: string): CreditDef[] | null {  const n =
   if (n.includes("business gold")) return BIZ_GOLD;
   if (n.includes("platinum")) return PERSONAL_PLAT; // incl. co-branded Platinum variants
   return null;
+}
+
+/** Enrollment notice for defs that set enrollmentRequired without their own enrollmentNote. */
+export const DEFAULT_ENROLLMENT_NOTE =
+  "Enrollment required: enroll this card in the benefit first — the credit only pays out after enrollment.";
+
+/**
+ * Catalog enrollment metadata for one credit instance: whether the
+ * issuer requires enrolling in the benefit before use, and the notice
+ * the expanded detail should show. Resolved from the catalog defs by
+ * (account product, credit name) so a stored row and a synthesized
+ * instance of the same credit report it identically. A credit whose
+ * name matches no def on the account's product (e.g. a user-created
+ * row) reports not-required.
+ */
+export function enrollmentInfoFor(
+  accountName: string,
+  creditName: string,
+): { required: boolean; note: string | null } {
+  const key = creditName.trim().toLowerCase();
+  const defs = [
+    ...(catalogFor(accountName) ?? []),
+    ...nonSeededDefsFor(accountName),
+  ];
+  const def = defs.find((d) => d.name.trim().toLowerCase() === key);
+  if (!def?.enrollmentRequired) return { required: false, note: null };
+  return { required: true, note: def.enrollmentNote ?? DEFAULT_ENROLLMENT_NOTE };
 }
 
 /**
@@ -510,6 +551,13 @@ const creditView = z.object({
   anchorMonth: z.number().nullable(),
   anchorDay: z.number().nullable(),
   enrolled: z.boolean(),
+  /**
+   * Catalog fact: the issuer requires enrolling in this benefit before
+   * use. Independent of the row's `enrolled` state above.
+   */
+  enrollmentRequired: z.boolean(),
+  /** Enrollment notice for the expanded detail; null unless enrollmentRequired. */
+  enrollmentNote: z.string().nullable(),
   active: z.boolean(),
   note: z.string(),
   matchPattern: z.string(),
@@ -752,6 +800,7 @@ async function computeDashboard(
         })
         .map((c) => {
           const acct = accountById.get(c.accountId)!;
+          const enrollment = enrollmentInfoFor(acct.name, c.name);
           const period = c.period as Period;
           const effectiveActive = c.active === 1 || isPinnedCredit(c.name);
           const anchor =
@@ -792,6 +841,8 @@ async function computeDashboard(
             anchorMonth: c.anchorMonth,
             anchorDay: c.anchorDay,
             enrolled: c.enrolled === 1,
+            enrollmentRequired: enrollment.required,
+            enrollmentNote: enrollment.note,
             active: effectiveActive,
             note: c.note,
             matchPattern: c.matchPattern,

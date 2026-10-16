@@ -47,6 +47,10 @@ function creditBlock(c: Credit): string {
     `- ${money(c.amount)} credit · ${money(c.currentUsed)} used · ${money(c.currentRemaining)} remaining · ${statusOf(c)}`,
   );
   if (!c.enrolled) lines.push("- Enrollment: not enrolled yet — enroll before using");
+  // The catalog fact that this benefit requires enrollment at all (as
+  // opposed to the row's enrollment state above): an assistant must
+  // never advise spending toward a credit that cannot pay out yet.
+  if (c.enrollmentRequired && c.enrollmentNote) lines.push(`- ${c.enrollmentNote}`);
   // The catalog note is the usage rule (how to redeem, trigger conditions,
   // manual-claim steps) — the part that lets an assistant advise, not just
   // report numbers.
