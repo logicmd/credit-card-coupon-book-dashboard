@@ -4,6 +4,10 @@ Track every Amex and Chase statement credit across all your cards — and actual
 
 If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant, Chase Sapphire Preferred…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual — and some run on your cardmember anniversary year instead of the calendar year. They are easy to forget and issuers do not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
 
+![Dashboard on mobile — a real two-person household's credits; cardholder names shown as P1 / P2](docs/dashboard-mobile.png)
+
+*The dashboard in real use (mobile width, full page): one household, two cardholders — shown as P1 and P2 — with every tracked credit's current-period used and remaining amounts.*
+
 ## Supported cards (verified)
 
 "Verified" means two things, and both are required: the card has catalog definitions in this repo (`server/src/actions.ts`), **and** unit tests pin those definitions down — the catalog tests assert each card's credit amounts, cycles, posting-name patterns, and anniversary anchors, and the DB-backed suites exercise the Chase products end to end. Exactly these nine cards qualify:
