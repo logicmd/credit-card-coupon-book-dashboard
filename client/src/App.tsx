@@ -28,15 +28,47 @@ const fmtDay = (iso: string) =>
 
 const MONO = "font-mono tabular-nums";
 
-function shortCard(name: string, mask: string): string {
-  const base = name
+/**
+ * A card's effective ending: the recorded fifth digit followed by the
+ * mask ("41003") when a digit is set, otherwise the plain mask
+ * ("1003"). The server defines the same rule (effectiveEnding in
+ * agentMarkdown.ts); every surface renders endings through it.
+ */
+function endingOf(mask: string, fifthDigit: string): string {
+  return fifthDigit !== "" && mask !== "" ? `${fifthDigit}${mask}` : mask;
+}
+
+/**
+ * The canonical compact card label: owner label + effective ending,
+ * plainly — "Kun 41003" (fifth digit recorded) or "Na 1003". Falls
+ * back to whichever half exists; "" when neither does.
+ */
+function cardTag(owner: string | null, mask: string, fifthDigit: string): string {
+  const ending = endingOf(mask, fifthDigit);
+  if (owner && ending) return `${owner} ${ending}`;
+  return ending || owner || "";
+}
+
+/** Shortened product name ("Hilton Honors Aspire Card" → "Aspire"). */
+function shortProduct(name: string): string {
+  return name
     .replace(/®/g, "")
     .replace("American Express Card", "")
     .replace(" Card", "")
     .replace("Hilton Honors ", "")
     .replace("Marriott Bonvoy ", "Marriott ")
     .trim();
-  return mask ? `${base} ··${mask}` : base;
+}
+
+/**
+ * How a card is identified in rows and lists: the canonical tag
+ * followed by the product — "Kun 41003 · Aspire". Falls back to the
+ * product alone when there is no tag (no owner label and no ending).
+ */
+function cardLabel(owner: string | null, name: string, mask: string, fifthDigit: string): string {
+  const tag = cardTag(owner, mask, fifthDigit);
+  const product = shortProduct(name);
+  return tag ? `${tag} · ${product}` : product;
 }
 
 // The household's logins belong to different master accounts (for example,
@@ -502,7 +534,7 @@ function CreditRow({
     <li className={nested ? "py-3" : "px-4 py-3"}>
       <button
         type="button"
-        aria-label={`${c.name} on ${shortCard(c.accountName, c.mask)} — details`}
+        aria-label={`${c.name} on ${cardLabel(c.owner, c.accountName, c.mask, c.fifthDigit)} — details`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="block w-full text-left"
@@ -511,7 +543,7 @@ function CreditRow({
           <div className="min-w-0">
             <div className="text-base font-medium leading-snug">
               {!nested && <PrefixChip label={prefixFor(c)} />}
-              {nested ? shortCard(c.accountName, c.mask) : c.name}
+              {nested ? cardLabel(c.owner, c.accountName, c.mask, c.fifthDigit) : c.name}
               <OwnerBadge owner={c.owner} />
               {!c.enrolled && (
                 <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
@@ -527,7 +559,7 @@ function CreditRow({
             <div className="mt-0.5 text-sm text-[var(--dim)]">
               {nested
                 ? `${c.periodLabel} · ends ${c.periodEnd}`
-                : `${shortCard(c.accountName, c.mask)} · ${c.periodLabel} · ends ${c.periodEnd}`}
+                : `${cardLabel(c.owner, c.accountName, c.mask, c.fifthDigit)} · ${c.periodLabel} · ends ${c.periodEnd}`}
             </div>
           </div>
           <div className="shrink-0 text-right">
@@ -936,7 +968,7 @@ function UnassignedSection({ data, onChanged }: { data: Dashboard; onChanged: ()
                   <span className={MONO}>{money(p.amount, p.currency)}</span>
                 </div>
                 <div className="mt-1 text-xs text-[var(--dim)]">
-                  {shortCard(p.accountName, p.mask)}
+                  {cardLabel(p.owner, p.accountName, p.mask, p.fifthDigit)}
                   <OwnerBadge owner={p.owner} />
                 </div>
                 {options.length > 0 ? (
@@ -1217,6 +1249,91 @@ function NicknameForm({
   );
 }
 
+/**
+ * Fifth-digit recorder for same-ending cards: two cards of one product
+ * can share the last four digits; the digit just before them — visible
+ * in the issuer's app as part of the five-digit ending — tells them
+ * apart. User-owned like the nickname: stored on the account via
+ * updateAccount, and imports never overwrite it.
+ */
+function FifthDigitForm({
+  accountId,
+  accountLabel,
+  fifthDigit,
+  onChanged,
+}: {
+  accountId: number;
+  accountLabel: string;
+  fifthDigit: string;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(fifthDigit);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => api.updateAccount({ accountId, fifthDigit: value.trim() }),
+    onSuccess: () => {
+      setOpen(false);
+      onChanged();
+    },
+    onError: (e) => setMsg(String(e)),
+  });
+  if (!open) {
+    return (
+      <button
+        type="button"
+        aria-label={`${fifthDigit ? "Change" : "Record"} fifth digit for ${accountLabel}`}
+        onClick={() => setOpen(true)}
+        className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+      >
+        {fifthDigit ? "Change fifth digit" : "Record fifth digit"}
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const v = value.trim();
+        if (v !== "" && !/^[0-9]$/.test(v)) {
+          setMsg("Enter the single digit before the last four — or leave it empty to clear.");
+          return;
+        }
+        save.mutate();
+      }}
+      className="flex flex-wrap items-center gap-2"
+      aria-label={`Fifth digit for ${accountLabel}`}
+    >
+      <input
+        aria-label={`Fifth digit for ${accountLabel}`}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="e.g. 4"
+        inputMode="numeric"
+        maxLength={1}
+        className="w-16 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+      />
+      <button
+        type="submit"
+        aria-label="Save fifth digit"
+        disabled={save.isPending}
+        className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+      >
+        Save digit
+      </button>
+      <button
+        type="button"
+        aria-label="Cancel editing fifth digit"
+        onClick={() => setOpen(false)}
+        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+      >
+        Cancel
+      </button>
+      {msg && <span className="text-sm text-[var(--bad)]">{msg}</span>}
+    </form>
+  );
+}
+
 const TIMEZONE_CHOICES = [
   "America/Los_Angeles",
   "America/New_York",
@@ -1295,6 +1412,24 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
     mutationFn: (id: number) => api.updateCredit({ id, active: true }),
     onSuccess: onChanged,
   });
+  // Same-ending peers (the server heuristic's grouping, here on owner
+  // labels): another tracked account of the same owner with the same
+  // product and the same effective ending. Those are the cards a user
+  // cannot tell apart at a glance — each gets a disambiguation block
+  // with its stored-transaction evidence and a fifth-digit input. A
+  // different owner's same-ending card is never a peer: the owner
+  // label already distinguishes it.
+  const sameEndingPeers = (a: Dashboard["accounts"][number]) =>
+    a.ignored || a.mask === ""
+      ? []
+      : data.accounts.filter(
+          (x) =>
+            x.id !== a.id &&
+            !x.ignored &&
+            (x.owner ?? null) === (a.owner ?? null) &&
+            x.name.trim().toLowerCase() === a.name.trim().toLowerCase() &&
+            endingOf(x.mask, x.fifthDigit) === endingOf(a.mask, a.fifthDigit),
+        );
   // Cards grouped by issuer, then by login (master account) within each
   // issuer — "Alex's Amex login" and "Alex's Chase login" are separate
   // sections. The group labels come from the dashboard data (the
@@ -1336,12 +1471,14 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                 {grp.label} ({grp.accounts.filter((a) => !a.ignored).length} tracked)
               </div>
               <ul className="divide-y divide-[var(--border)]">
-                {grp.accounts.map((a) => (
+                {grp.accounts.map((a) => {
+                  const peers = sameEndingPeers(a);
+                  return (
               <li key={a.id} className="px-4 py-3">
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">
-                      {shortCard(a.name, a.mask)}
+                      {cardLabel(a.owner, a.name, a.mask, a.fifthDigit)}
                       <OwnerBadge owner={a.owner} />
                     </span>
                     <span className="text-xs text-[var(--dim)]">
@@ -1363,34 +1500,84 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                     {a.duplicateSuspectIds
                       .map((id) => data.accounts.find((x) => x.id === id))
                       .filter((x): x is NonNullable<typeof x> => x != null)
-                      .map((x) => shortCard(x.name, x.mask))
+                      .map((x) => cardLabel(x.owner, x.name, x.mask, x.fifthDigit))
                       .join("; ")}
                     {" "}— both records are counted in every total until you mark one as a
                     duplicate below. If they are genuinely separate cards, no action is needed.
+                    {peers.length > 0 &&
+                      " If they are separate cards that share an ending, record each card's fifth digit below — cards whose five-digit endings differ stop being flagged."}
                   </p>
+                )}
+                {peers.length > 0 && (
+                  <div className="mt-2 rounded-lg bg-[var(--bg)] px-3 py-3">
+                    <p className="text-sm font-medium text-[var(--warn)]">
+                      Same ending as{" "}
+                      {peers.map((x) => cardLabel(x.owner, x.name, x.mask, x.fifthDigit)).join("; ")}
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--dim)]">
+                      Cards of one product can share the last four digits. The digit just before
+                      them tells them apart — your issuer's app shows the five-digit ending (in
+                      the Amex app, it is the ending shown on the card). Record this card's fifth
+                      digit and cards whose endings differ stop being flagged as possible
+                      duplicates.
+                    </p>
+                    {a.disambiguation &&
+                      (a.disambiguation.annualFeePosting != null ||
+                        a.disambiguation.recentPostings.length > 0) && (
+                        <div className="mt-2 text-sm text-[var(--dim)]">
+                          <p>What this record shows, to help you recognize the physical card:</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {a.disambiguation.annualFeePosting && (
+                              <li>
+                                Annual fee ·{" "}
+                                <span className={MONO}>{fmtDay(a.disambiguation.annualFeePosting.date)}</span>{" "}
+                                {a.disambiguation.annualFeePosting.name} ·{" "}
+                                {money(a.disambiguation.annualFeePosting.amount, a.currency ?? "USD")}
+                              </li>
+                            )}
+                            {a.disambiguation.recentPostings.map((p, i) => (
+                              <li key={i}>
+                                <span className={MONO}>{fmtDay(p.date)}</span> {p.name} ·{" "}
+                                {money(p.amount, a.currency ?? "USD")}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    <div className="mt-2">
+                      <FifthDigitForm
+                        key={`${a.id}:${a.fifthDigit}`}
+                        accountId={a.id}
+                        accountLabel={cardLabel(a.owner, a.name, a.mask, a.fifthDigit)}
+                        fifthDigit={a.fifthDigit}
+                        onChanged={onChanged}
+                      />
+                    </div>
+                  </div>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    aria-label={`${a.ignored ? "Un-ignore" : "Ignore"} card ${shortCard(a.name, a.mask)}`}
+                    aria-label={`${a.ignored ? "Un-ignore" : "Ignore"} card ${cardLabel(a.owner, a.name, a.mask, a.fifthDigit)}`}
                     onClick={() => setIgnored.mutate({ accountId: a.id, ignored: !a.ignored })}
                     className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
                   >
                     {a.ignored ? "Un-ignore" : "Ignore as duplicate"}
                   </button>
-                  {!a.ignored && <AddCreditForm accountId={a.id} accountLabel={shortCard(a.name, a.mask)} onChanged={onChanged} />}
+                  {!a.ignored && <AddCreditForm accountId={a.id} accountLabel={cardLabel(a.owner, a.name, a.mask, a.fifthDigit)} onChanged={onChanged} />}
                   {!a.ignored && (
                     <NicknameForm
                       key={`${a.id}:${a.nickname}`}
                       accountId={a.id}
-                      accountLabel={shortCard(a.name, a.mask)}
+                      accountLabel={cardLabel(a.owner, a.name, a.mask, a.fifthDigit)}
                       nickname={a.nickname}
                       onChanged={onChanged}
                     />
                   )}
                 </div>
               </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           ))}
@@ -1402,7 +1589,7 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                   <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
                     <span>
                       <PrefixChip label={prefixFor(c)} />
-                      {c.name} <span className="text-[var(--dim)]">· {shortCard(c.accountName, c.mask)}</span>
+                      {c.name} <span className="text-[var(--dim)]">· {cardLabel(c.owner, c.accountName, c.mask, c.fifthDigit)}</span>
                       <OwnerBadge owner={c.owner} />
                     </span>
                     <button
