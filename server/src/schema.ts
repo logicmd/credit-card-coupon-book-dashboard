@@ -1,14 +1,20 @@
 // Drizzle schema for the Credit Card Coupon Book Dashboard.
 //
 // accounts  — one row per Plaid account record (supplementary-card
-//             duplicates across the two logins are flagged `ignored`).
+//             duplicates across the two logins are flagged `ignored` —
+//             only ever by the user's own decision, never by a guess).
 // credits   — the benefit catalog: one row per (account, credit) with its
 //             calendar-period amount. All rows user-editable.
-// postings  — actual statement-credit postings imported from Plaid
-//             (amount is positive = dollars of credit received), plus
+// postings  — actual statement-credit postings imported from Plaid, plus
 //             manual rows the user adds (txnId null, source 'manual').
-// meta      — key/value store (last import time, refresh task id, and the
-//             display labels for the two logins: ownerALabel / ownerBLabel).
+//             Amounts are SIGNED: positive = dollars of credit received,
+//             negative = a reversal / clawback (the issuer took a credit
+//             back). The store is merge-only and never deletes, so
+//             corrections arrive as reversing entries that net against
+//             the original posting.
+// meta      — key/value store (last import time, refresh task id, the
+//             display labels for the two logins: ownerALabel / ownerBLabel,
+//             the display-exclusion preference, and the user's timezone).
 
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
@@ -21,6 +27,16 @@ export const accounts = sqliteTable("accounts", {
   creditLimit: real("credit_limit"),
   /** Card network issuer of this account: "Amex" or "Chase". */
   issuer: text("issuer").notNull().default("Amex"),
+  /**
+   * User-chosen display prefix for this account (e.g. "UA"), shown before
+   * the account's name everywhere the dashboard and the Agent Markdown
+   * render it. Set only through the updateAccount action — a Plaid
+   * re-import NEVER overwrites it (imports rewrite the Plaid `name`,
+   * which is exactly why the stable user label lives in its own column).
+   */
+  nickname: text("nickname").notNull().default(""),
+  /** ISO currency code from Plaid (balances.iso_currency_code); null → USD. */
+  currency: text("currency"),
   /**
    * Which login (master account) this account record belongs to,
    * stored as a key: "A" for the first login, "B" for the second. The
@@ -56,6 +72,19 @@ export const credits = sqliteTable("credits", {
    */
   anchorMonth: integer("anchor_month"),
   anchorDay: integer("anchor_day"),
+  /**
+   * 1 once a human has confirmed the anniversary anchor is the card's
+   * real one. Anchors seeded from catalog defaults start at 0
+   * (unconfirmed) and surface in the UI and the Agent Markdown warnings
+   * until the user confirms or corrects them via updateCredit.
+   */
+  anchorConfirmed: integer("anchor_confirmed").notNull().default(0),
+  /**
+   * 1 when the user deleted this credit. Deletion is a tombstone, not a
+   * hard delete: the row stays so compute-time synthesis (which fills in
+   * every catalog credit that has no stored row) never resurrects it.
+   */
+  deleted: integer("deleted").notNull().default(0),
   /** Lowercase substring matched against Plaid posting names for auto-mapping. */
   matchPattern: text("match_pattern").notNull().default(""),
   enrolled: integer("enrolled").notNull().default(1),
@@ -82,7 +111,11 @@ export const postings = sqliteTable("postings", {
    */
   transactionDate: text("transaction_date"),
   name: text("name").notNull(),
-  /** Positive dollars of statement credit received. */
+  /**
+   * Signed dollars: positive = statement credit received, negative = a
+   * reversal / clawback of an earlier credit. Usage sums signed amounts,
+   * so a clawback reduces used and restores remaining.
+   */
   amount: real("amount").notNull(),
   source: text("source", { enum: ["plaid", "manual"] })
     .notNull()

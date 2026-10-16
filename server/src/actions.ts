@@ -38,9 +38,13 @@ type CreditDef = {
    */
   enrollmentNote?: string;
   /**
-   * Anniversary anchor for annual credits (e.g. 5/1): the credit year runs
-   * anchor-to-anchor instead of Jan 1 – Dec 31. Only meaningful with
-   * period "annual".
+   * Anniversary anchor (e.g. 5/1) for credits whose cycle runs on the
+   * cardmember year instead of the calendar: annual credits run
+   * anchor-to-anchor, semiannual credits run in two 6-month halves from
+   * the anchor. The values in this catalog are PLACEHOLDER defaults —
+   * every cardholder's real anniversary differs — so rows seeded from
+   * them start with the anchor UNCONFIRMED and the dashboard warns
+   * until the user confirms or corrects it (see anchorConfirmed).
    */
   anchorMonth?: number;
   anchorDay?: number;
@@ -66,12 +70,18 @@ const PERSONAL_PLAT: CreditDef[] = [
 
 const ASPIRE: CreditDef[] = [
   { name: "Flight Credit", amount: 50, period: "quarterly", pattern: "flight credit", note: "Flights booked directly with airlines or Amex Travel" },
-  { name: "Hilton Resort Credit", amount: 200, period: "semiannual", pattern: "hilton", note: "At participating Hilton resorts. Amex runs this on a cardmember-year cycle; tracked here in calendar halves — edit the credit if your cycle differs" },
+  // Amex runs the resort credit on a cardmember-year cycle (two 6-month
+  // halves from the account anniversary), NOT calendar halves. The
+  // anchor below is the same kind of placeholder default as the Chase
+  // anchors: it starts unconfirmed and the dashboard warns until the
+  // user sets it to their real anniversary.
+  { name: "Hilton Resort Credit", amount: 200, period: "semiannual", anchorMonth: 5, anchorDay: 1, pattern: "hilton", note: "At participating Hilton resorts. Amex runs this on a cardmember-year cycle — two 6-month halves from your account anniversary; the May 1 anchor is a placeholder default, so confirm or edit the credit's anchor to match your anniversary" },
 ];
 
 const BRILLIANT: CreditDef[] = [
   { name: "Dining Credit", amount: 25, period: "monthly", pattern: "dining", note: "Restaurants worldwide, up to $25 back per month" },
-  { name: "Property Credit", amount: 300, period: "annual", pattern: "property credit", note: "Per cardmember year, on a 2+ night stay at St. Regis / Ritz-Carlton" },
+  // The $300 Property Credit is deliberately absent: Marriott ended
+  // that benefit long ago, so it is not a live credit and is not tracked.
 ];
 
 const BIZ_GOLD: CreditDef[] = [
@@ -404,13 +414,56 @@ export function accountDuplicateKey(
 // Calendar-period math (America/Los_Angeles calendar dates, YYYY-MM-DD).
 // ---------------------------------------------------------------------------
 
-function todayLA(): string {
+/** Meta key holding the user's IANA timezone preference. */
+export const TIMEZONE_META_KEY = "timezone";
+
+/**
+ * Default timezone for "today" and every period computation. It is the
+ * historical behavior of this app; a user in another timezone sets their
+ * own via the setTimezone action (stored under TIMEZONE_META_KEY), and
+ * every computation follows it — period boundaries are local-midnight
+ * boundaries, so the wrong zone shows the wrong period at the edges.
+ */
+export const DEFAULT_TIMEZONE = "America/Los_Angeles";
+
+export function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The stored timezone if it is a real IANA zone, else the default. */
+export function resolveTimeZone(raw: string | null | undefined): string {
+  return raw != null && raw !== "" && isValidTimeZone(raw) ? raw : DEFAULT_TIMEZONE;
+}
+
+/** Calendar date (YYYY-MM-DD) of an instant in the given timezone, or null. */
+export function dateInTimeZone(iso: string, timeZone: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Today's calendar date (YYYY-MM-DD) in the given timezone. */
+export function todayInTimeZone(timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+function todayLA(): string {
+  return todayInTimeZone(DEFAULT_TIMEZONE);
 }
 
 function parseDate(s: string): { y: number; m: number; d: number } {
@@ -480,6 +533,33 @@ export function periodBounds(period: Period, dateStr: string, anchor?: Anchor | 
       label: `Q${q + 1} ${y}`,
     };
   }
+  if (period === "semiannual" && anchor) {
+    // Cardmember-year halves: the cycle year starts on the anchor date
+    // and splits into two 6-month halves (anchor → anchor+6mo → anchor).
+    // Used by the Aspire resort credit, which Amex runs on the account
+    // anniversary rather than the calendar.
+    const anchorDayThisYear = Math.min(anchor.day, daysInMonth(y, anchor.month));
+    const startsThisYear = dateStr >= fmt(y, anchor.month, anchorDayThisYear);
+    const startY = startsThisYear ? y : y - 1;
+    const cycleStart = fmt(
+      startY,
+      anchor.month,
+      Math.min(anchor.day, daysInMonth(startY, anchor.month)),
+    );
+    const halfStart = addMonths(cycleStart, 6);
+    const first = dateStr < halfStart;
+    const start = first ? cycleStart : halfStart;
+    const end = addDays(addMonths(start, 6), -1);
+    const sp = parseDate(start);
+    const ep = parseDate(end);
+    return {
+      start,
+      end,
+      key: `${startY}-S${String(anchor.month).padStart(2, "0")}${String(anchor.day).padStart(2, "0")}-${first ? 1 : 2}`,
+      label:
+        `${MONTH_NAMES[sp.m - 1] ?? ""} ${sp.y} – ${MONTH_NAMES[ep.m - 1] ?? ""} ${ep.y}`,
+    };
+  }
   if (period === "semiannual") {
     const first = m <= 6;
     const sm = first ? 1 : 7;
@@ -508,6 +588,29 @@ export function addDays(dateStr: string, delta: number): string {
   return fmt(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
 }
 
+/** Add whole calendar months, clamping the day to the target month's length. */
+export function addMonths(dateStr: string, delta: number): string {
+  const { y, m, d } = parseDate(dateStr);
+  const total = y * 12 + (m - 1) + delta;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  return fmt(ny, nm, Math.min(d, daysInMonth(ny, nm)));
+}
+
+/**
+ * Strict calendar-date check for imported / manually entered dates: the
+ * "YYYY-MM-DD" shape AND a date that actually exists (2026-13-40 and
+ * 2026-02-30 are rejected, not silently rolled over by Date math).
+ */
+export function isValidCalendarDate(s: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!match) return false;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(y, m);
+}
+
 /**
  * The date a posting counts toward: its transaction date (Plaid
  * `authorized_date`) when known, otherwise its posted date. Period
@@ -522,14 +625,7 @@ export function transactionDateOf(p: {
 
 /** LA calendar date (YYYY-MM-DD) of an ISO timestamp, or null if unparseable. */
 export function laDateOf(iso: string): string | null {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
+  return dateInTimeZone(iso, DEFAULT_TIMEZONE);
 }
 
 // ---------------------------------------------------------------------------
