@@ -220,12 +220,24 @@ describe("enrollmentRequired — catalog metadata", () => {
         // business products that carry it.
         "Business Platinum Card® :: ChatGPT Business Credit",
         "Business Gold Card :: ChatGPT Business Credit",
+        // Business Platinum benefits Amex enrolls before purchases
+        // count (Dell, and the default-hidden Indeed / Adobe).
+        "Business Platinum Card® :: Dell Credit",
+        "Business Platinum Card® :: Indeed Credit",
+        "Business Platinum Card® :: Adobe Credit",
+        // The airline fee credit is enroll-and-select on both
+        // Platinum products: one airline must be chosen, and only
+        // that airline's charges count.
+        "Business Platinum Card® :: Airline Fee Credit",
+        "The Platinum Card® :: Airline Fee Credit",
         // Personal Platinum benefits whose terms require enrollment
         // (their catalog notes already said so).
         "The Platinum Card® :: Resy Credit",
         "The Platinum Card® :: Equinox Credit",
         "The Platinum Card® :: Digital Entertainment Credit",
         "The Platinum Card® :: Walmart+ Credit",
+        // Saks required a one-time enrollment while the benefit ran.
+        "The Platinum Card® :: Saks Credit",
       ].sort(),
     );
   });
@@ -235,11 +247,11 @@ describe("enrollmentRequired — catalog metadata", () => {
       ["Hilton Honors Aspire Card", "Flight Credit"],
       ["Hilton Honors Aspire Card", "Hilton Resort Credit"],
       ["Chase Sapphire Preferred®", "Annual Hotel Credit"],
-      ["Business Platinum Card®", "Dell Credit"],
-      ["Business Platinum Card®", "Airline Fee Credit"],
       ["Business Platinum Card®", "Wireless Credit"],
       ["Business Gold Card", "Flexible Business Credit"],
       ["Marriott Bonvoy Brilliant® American Express® Card", "Dining Credit"],
+      // The IHG airline credit is automatic — no enrollment step.
+      ["IHG One Rewards Premier Credit Card", "Airline Credit"],
       // The Ritz travel credit is a manual claim, not an enrollment.
       ["The Ritz-Carlton® Credit Card", "Travel Credit"],
     ] as const) {
@@ -256,6 +268,14 @@ describe("enrollmentRequired — catalog metadata", () => {
       required: true,
       note: DEFAULT_ENROLLMENT_NOTE,
     });
+    // The airline fee credit is enroll-and-select on both Platinum
+    // products, and its note carries all three facts.
+    const airline = enrollmentInfoFor("Business Platinum Card®", "Airline Fee Credit");
+    expect(airline.required).toBe(true);
+    expect(airline.note).toContain("select a single qualifying airline");
+    expect(airline.note).toContain("only that airline's incidental charges count");
+    expect(airline.note).toContain("changed each January");
+    expect(enrollmentInfoFor("The Platinum Card®", "Airline Fee Credit")).toEqual(airline);
     // A name no catalog def carries is not an enrollment benefit.
     expect(enrollmentInfoFor("Business Gold Card", "Made-Up Credit")).toEqual({
       required: false,

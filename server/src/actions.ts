@@ -49,8 +49,8 @@ type CreditDef = {
 const BIZ_PLAT: CreditDef[] = [
   { name: "Hotel Credit (FHR / Hotel Collection)", amount: 300, period: "semiannual", pattern: "hotel credit", note: "Prepaid FHR or The Hotel Collection via Amex Travel; Hotel Collection needs 2+ nights" },
   { name: "Hilton Credit", amount: 50, period: "quarterly", pattern: "hilton", note: "Direct Hilton purchases; needs Hilton for Business enrollment", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll the card in Hilton for Business first — Hilton purchases count toward the credit only after enrollment" },
-  { name: "Dell Credit", amount: 150, period: "annual", pattern: "dell", note: "Plus $1,000 more after $5,000 of Dell spend in the year" },
-  { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline" },
+  { name: "Dell Credit", amount: 150, period: "annual", pattern: "dell", note: "Plus $1,000 more after $5,000 of Dell spend in the year", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll the card in the Dell credit first — Dell purchases count toward the credit only after enrollment" },
+  { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll and select a single qualifying airline — only that airline's incidental charges count toward the credit, and the airline selection can be changed each January" },
   { name: "Wireless Credit", amount: 10, period: "monthly", pattern: "wireless", note: "U.S. wireless provider paid directly — your mobile phone bill credit" },
 ];
 
@@ -58,8 +58,8 @@ const PERSONAL_PLAT: CreditDef[] = [
   { name: "Hotel Credit (FHR / Hotel Collection)", amount: 300, period: "semiannual", pattern: "hotel credit", note: "Prepaid FHR or The Hotel Collection via Amex Travel; Hotel Collection needs 2+ nights" },
   { name: "Resy Credit", amount: 100, period: "quarterly", pattern: "resy", note: "U.S. Resy restaurants; enrollment required", enrollmentRequired: true },
   { name: "Lululemon Credit", amount: 75, period: "quarterly", pattern: "lululemon", note: "U.S. lululemon stores (excl. outlets) and online" },
-  { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline" },
-  { name: "Saks Credit", amount: 50, period: "semiannual", pattern: "saks", note: "Saks Fifth Avenue purchases" },
+  { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll and select a single qualifying airline — only that airline's incidental charges count toward the credit, and the airline selection can be changed each January" },
+  { name: "Saks Credit", amount: 50, period: "semiannual", pattern: "saks", note: "Saks Fifth Avenue purchases", enrollmentRequired: true, enrollmentNote: "Enrollment required: a one-time enrollment in the Saks credit was required before Saks purchases counted (this benefit has ended)" },
   { name: "Oura Ring Credit", amount: 200, period: "annual", pattern: "oura", note: "Oura Ring hardware only, via ouraring.com" },
   { name: "Uber One Credit", amount: 120, period: "annual", pattern: "uber one", note: "Auto-renewing Uber One membership paid with this card" },
 ];
@@ -123,8 +123,8 @@ const RITZ_CARLTON: CreditDef[] = [
 
 const BIZ_PLAT_NON_SEEDED: CreditDef[] = [
   { name: "ChatGPT Business Credit", amount: 300, period: "annual", pattern: "chatgpt", note: "ChatGPT Business subscription credit; each business card enrolls separately", enrollmentRequired: true, enrollmentNote: "Enrollment required: each card must be enrolled in the ChatGPT Business credit separately — a card's credit only pays out after that card is enrolled" },
-  { name: "Indeed Credit", amount: 200, period: "annual", pattern: "indeed", note: "U.S. purchases with Indeed" },
-  { name: "Adobe Credit", amount: 150, period: "annual", pattern: "adobe", note: "Adobe Creative Cloud / Acrobat purchases" },
+  { name: "Indeed Credit", amount: 200, period: "annual", pattern: "indeed", note: "U.S. purchases with Indeed", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll the card in the Indeed credit first — Indeed purchases count toward the credit only after enrollment" },
+  { name: "Adobe Credit", amount: 150, period: "annual", pattern: "adobe", note: "Adobe Creative Cloud / Acrobat purchases", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll the card in the Adobe credit first — Adobe purchases count toward the credit only after enrollment" },
 ];
 
 const BIZ_GOLD_NON_SEEDED: CreditDef[] = [

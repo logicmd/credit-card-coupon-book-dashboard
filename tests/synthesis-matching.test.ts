@@ -302,9 +302,10 @@ describe("enrollment metadata — dashboard payload and Agent Markdown", () => {
     const flex = creditOn(dash, goldId, "Flexible Business Credit");
     expect(flex.enrollmentRequired).toBe(false);
     expect(flex.enrollmentNote).toBeNull();
+    // Dell is enrollment-gated: its stored row resolves the notice too.
     const dell = creditOn(dash, platId, "Dell Credit");
-    expect(dell.enrollmentRequired).toBe(false);
-    expect(dell.enrollmentNote).toBeNull();
+    expect(dell.enrollmentRequired).toBe(true);
+    expect(dell.enrollmentNote).toContain("Dell purchases count toward the credit only after enrollment");
 
     // The Agent Markdown shows the same notices in the credit details.
     const md: string = ((await Actions.getAgentMarkdown.handler(ctx, {})) as any).markdown;
