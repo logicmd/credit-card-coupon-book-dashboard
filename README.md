@@ -39,12 +39,17 @@ The intended workflow is to let your own Muse (or another AI assistant) prepare 
 
 - **Real usage, not guesses** — usage is computed from the actual statement-credit postings on your accounts (e.g. `Platinum Lululemon Credit`, `AMEX Flight Credit`), never inferred from spending.
 - **Transaction-date attribution** — a credit counts toward the period of the underlying transaction (`authorized_date`), not the day the issuer posted it. A Hilton charge on Sep 30 whose credit posts Oct 2 counts in Q3, not Q4. Both dates are stored (the posted date is display-only), and a later import can correct a transaction date in place.
-- **Anniversary-year cycles** — credits whose program runs on your cardmember year (e.g. Chase Sapphire Preferred's hotel credit, World of Hyatt Business) carry an anchor date and run anchor-to-anchor (May 1 – Apr 30) instead of Jan 1 – Dec 31.
+- **Anniversary-year cycles** — credits whose program runs on your cardmember year (e.g. Chase Sapphire Preferred's hotel credit, World of Hyatt Business) carry an anchor date and run anchor-to-anchor (May 1 – Apr 30) instead of Jan 1 – Dec 31. The Hilton Aspire resort credit runs on two 6-month halves of the cardmember year the same way. **Catalog anchors are placeholders**: a credit seeded from the catalog is marked *anchor unconfirmed* — flagged on the credit and in the Agent Markdown — until you confirm or correct it, because everyone's real anniversary differs.
 - **Merged view** — the same credit on six cards shows as one row with the combined total; expand it to see each card.
-- **Household logins, grouped by person** — cards are often spread across several logins (two people × Amex + Chase). Each account is tagged with its person's key; labels are configurable ("Login 1" / "Login 2" by default), and one person's Amex and Chase logins share their label. Labels can be set or corrected any time — easiest after the first import, when the accounts make it obvious whose login is whose. Summary totals are always combined.
-- **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about never appear: an exclusion list (built-in defaults, then your own stored preference) hides them. The list is yours to choose — flip the toggles in the page's Display settings section, or just ask your Muse in chat; both edit the same stored preference.
-- **Incremental refresh** — daily refresh pulls only the last 30 days from Plaid and merges by transaction ID. Nothing already stored is ever deleted; a coverage-start marker shows how far back your data goes. If coverage is incomplete, refresh bootstraps from Jan 1 of the current year first.
+- **Household logins, grouped by person** — cards are often spread across several logins (two people × Amex + Chase). Each account is tagged with its person's key; labels are configurable ("Login 1" / "Login 2" by default), and one person's Amex and Chase logins share their label. Attribution is **sticky**: imports only fill an account that has no owner yet and never overwrite one; the refresh attributes logins to people from account evidence and leaves an account "not identified yet" (surfaced in the UI and the Agent Markdown) rather than guessing. You can correct an owner any time in the Cards section. Summary totals are always combined.
+- **Account nicknames** — give any account a short display prefix (e.g. `UA`, `UABus`) in the Cards section; credit rows and the Agent Markdown use it in place of the product name. Nicknames are yours — Plaid re-imports never overwrite them.
+- **Duplicates are your decision** — two records of the same underlying card (a primary card and its supplementary-card view across logins) are never hidden automatically. Records that look alike (same product + mask, or transaction evidence that one record's transactions appear under another) are flagged *possible duplicate* in the Cards section and the Agent Markdown, stay counted in every total, and wait for you to mark one ignored.
+- **Clawbacks net out** — postings are signed: a credit the issuer paid is positive, a reversal/clawback is negative. Because the store is merge-only and never deletes, corrections arrive as reversing entries that net against the original credit in the period they land in, restoring its remaining amount. Manual entries accept negative amounts for the same reason.
+- **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about never appear: an exclusion list (built-in defaults, then your own stored preference) hides them. The list is yours to choose — flip the toggles in the page's Display settings section, or just ask your Muse in chat; both edit the same stored preference. Entries must be canonical (a family pattern or a full credit name) — fragments are rejected, since a fragment would hide nearly everything.
+- **Incremental refresh** — daily refresh pulls only the last 30 days from Plaid and merges by transaction ID. Nothing already stored is ever deleted; a coverage-start marker shows how far back your data goes. If coverage is incomplete, refresh bootstraps from Jan 1 of the current year — or from the start of the earliest current anniversary period when an anchored credit's period began last year, so its postings are never missed.
+- **Your timezone** — "today" and every period boundary are computed in a stored timezone preference (Display settings), defaulting to America/Los_Angeles.
 - **Refer a friend** — the header's Refer button shows a ready-to-paste Muse prompt: a friend pastes it into their own Muse and gets their own private dashboard from this repo, connected to their own Plaid. It refers the product, never your data.
+- **Warnings, not silent assumptions** — the Agent Markdown export carries a "Warnings — needs your decision" section (unconfirmed anchors, possible duplicates, enrollment-required credits not marked enrolled, logins not identified yet) and an Accounts section naming every imported account — including ones with no supported credits tracked — so an assistant discussing your credits sees the open questions instead of trusting numbers built on guesses. Enrollment is never assumed either: a credit whose benefit requires enrollment starts out *not enrolled* until you mark it.
 
 ## Run it in Muse (recommended)
 
@@ -70,9 +75,9 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 
 ## How it works
 
-- `server/src/actions.ts` — data actions: `importSnapshot` (merge-only Plaid import), `refreshCredits` (spawns the incremental 30-day refresh), `getDashboard`, credit/posting CRUD, `setOwnerLabels`.
-- `server/src/schema.ts` — accounts, credits, postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`).
-- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Instacart, Uber One credits, the discontinued Brilliant property credit, and Saks.
+- `server/src/actions.ts` — data actions: `importSnapshot` (merge-only Plaid import), `refreshCredits` (spawns the incremental 30-day refresh), `getDashboard`, credit/posting CRUD, `updateAccount` (nickname + owner), `setTimezone`, `setOwnerLabels`.
+- `server/src/schema.ts` — accounts (incl. user-set `nickname`, Plaid `currency`), credits (incl. `anchorConfirmed`, soft-delete tombstones), postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`, `excludedCredits`, `timezone`).
+- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Hidden by default (a stored display preference — meta `excludedCredits` — changeable in Display settings or via chat): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Global Entry, FareLock, and Instacart credits. The Marriott Brilliant property credit is not hidden but **removed**: the benefit ended in 2022, so it no longer exists in the catalog at all.
 
 ## Tests
 
@@ -81,8 +86,11 @@ bun test
 ```
 
 The suite (in `tests/`) covers the core logic: calendar-period windows
-(incl. anniversary-anchored annual cycles), the benefit catalog and exclusion
-list, posting→credit matching, duplicate-account detection, the merge-only
+(incl. anniversary-anchored annual and semiannual cycles), the benefit catalog and exclusion
+list, posting→credit matching, duplicate-account suspicion (flagged for the
+user's decision, never auto-ignored), signed postings and clawback netting,
+the refresh fetch-window logic (bootstrap / gap-fill floors follow anchored
+periods), materialize-on-write credits and delete tombstones, the merge-only
 import (re-importing a snapshot adds nothing), transaction-date attribution
 and in-place date correction, Chase catalog seeding end to end, dashboard
 totals across cards, and the client-side grouping of same-type credits.
