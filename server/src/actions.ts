@@ -126,11 +126,13 @@ const RITZ_CARLTON: CreditDef[] = [
 // ---------------------------------------------------------------------------
 
 const ALTITUDE_RESERVE: CreditDef[] = [
-  // The bank reimburses each qualifying travel/dining charge with its
-  // own small posting until the $325 cardmember-year allowance is used
-  // up. "Real-time Rewards Credit" postings are points redemptions, NOT
-  // this credit — the pattern below never matches them.
-  { name: "Travel/Dining Credit", amount: 325, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "travel/dining credit", note: "U.S. Bank reimburses travel and dining purchases: each qualifying charge gets its own small 'Annual Travel/dining Credit' posting, until $325 is used for the cardmember year. The cycle is the cardmember anniversary year — the May 1 anchor is a placeholder default; set it to the date your $400 annual fee posts" },
+  // The bank reimburses each qualifying travel charge with its own
+  // small posting until the $325 cardmember-year allowance is used up
+  // (the postings are still named "Annual Travel/dining Credit" from
+  // the years when dining was covered too). "Real-time Rewards Credit"
+  // postings are points redemptions, NOT this credit — the pattern
+  // below never matches them.
+  { name: "Travel Credit", amount: 325, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "travel/dining credit", note: "Current policy: the $325 annual credit covers only travel purchases made through the U.S. Bank Travel Center — dining is no longer eligible. Each qualifying purchase is reimbursed with its own small 'Annual Travel/dining Credit' posting until $325 is used for the cardmember year (the posting name is a leftover from earlier cardmember years, when dining purchases were reimbursed too). If a reimbursed purchase is refunded, the credit for it reverses and the year's room reopens — the year is tracked net. The cycle is the cardmember anniversary year — the May 1 anchor is a placeholder default; set it to the date your $400 annual fee posts" },
 ];
 
 // ---------------------------------------------------------------------------

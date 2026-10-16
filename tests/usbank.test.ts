@@ -29,11 +29,11 @@ const MAY_1 = { month: 5, day: 1 };
 const POSTING_NAME = "Annual Travel/dining Credit (up To $325)";
 
 describe("Altitude Reserve — catalog definition", () => {
-  test("the $325 travel/dining credit, annual on a May 1 placeholder anchor", () => {
+  test("the $325 travel credit, annual on a May 1 placeholder anchor", () => {
     const defs = catalogFor("U.S. Bank Altitude® Reserve Visa Infinite® Card")!;
     expect(defs).toEqual([
       expect.objectContaining({
-        name: "Travel/Dining Credit",
+        name: "Travel Credit",
         amount: 325,
         period: "annual",
         anchorMonth: 5,
@@ -41,12 +41,19 @@ describe("Altitude Reserve — catalog definition", () => {
         pattern: "travel/dining credit",
       }),
     ]);
+    // The note states the CURRENT policy: travel booked through the
+    // U.S. Bank Travel Center only — dining is no longer eligible (the
+    // "Travel/dining" posting name is a leftover from earlier years),
+    // and a refunded purchase reverses its credit, reopening the year.
+    expect(defs[0]!.note).toContain("only travel purchases made through the U.S. Bank Travel Center");
+    expect(defs[0]!.note).toContain("dining is no longer eligible");
+    expect(defs[0]!.note).toContain("the credit for it reverses and the year's room reopens");
     // Automatic reimbursement — no enrollment step.
     expect(defs[0]!.enrollmentRequired).toBeUndefined();
     expect(
       enrollmentInfoFor(
         "U.S. Bank Altitude® Reserve Visa Infinite® Card",
-        "Travel/Dining Credit",
+        "Travel Credit",
       ),
     ).toEqual({ required: false, note: null });
   });
@@ -91,7 +98,7 @@ async function importAltitude(
 }
 
 describe("Altitude Reserve import — issuer, seeding, anchored accrual", () => {
-  test("small travel/dining postings sum against the $325 cap in the anchored cardmember year", async () => {
+  test("small 'Annual Travel/dining Credit' postings sum against the $325 cap in the anchored cardmember year", async () => {
     const db = createTestDb();
     const today = todayLA();
     const anniversary = periodBounds("annual", today, MAY_1);
@@ -114,7 +121,7 @@ describe("Altitude Reserve import — issuer, seeding, anchored accrual", () => 
     expect(credits).toHaveLength(1);
     expect(credits[0]).toEqual(
       expect.objectContaining({
-        name: "Travel/Dining Credit",
+        name: "Travel Credit",
         amount: 325,
         period: "annual",
         anchorMonth: 5,
@@ -130,7 +137,7 @@ describe("Altitude Reserve import — issuer, seeding, anchored accrual", () => 
     const acct = dash.accounts.find((a: any) => a.mask === "4321");
     expect(acct.issuer).toBe("U.S. Bank");
 
-    const credit = dash.credits.find((c: any) => c.name === "Travel/Dining Credit");
+    const credit = dash.credits.find((c: any) => c.name === "Travel Credit");
     expect(credit.periodStart).toBe(anniversary.start);
     expect(credit.periodEnd).toBe(anniversary.end);
     expect(credit.periodLabel).toBe(anniversary.label);
@@ -155,7 +162,7 @@ describe("Altitude Reserve import — issuer, seeding, anchored accrual", () => 
     ]);
 
     const dash: any = await Actions.getDashboard.handler(fakeCtx(db), {});
-    const credit = dash.credits.find((c: any) => c.name === "Travel/Dining Credit");
+    const credit = dash.credits.find((c: any) => c.name === "Travel Credit");
     expect(credit.currentUsed).toBe(325);
     expect(credit.currentRemaining).toBe(0);
     expect(dash.unassigned).toHaveLength(0);
