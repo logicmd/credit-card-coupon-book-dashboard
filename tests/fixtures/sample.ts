@@ -33,6 +33,24 @@ export const ALEX_BIZ_PLAT = {
   owner: "A",
 } as const;
 
+export const ALEX_BIZ_GOLD = {
+  plaidAccountId: "fake-alex-bizgold-1212",
+  name: "Business Gold Card",
+  mask: "1212",
+  balance: 0,
+  creditLimit: 15000,
+  owner: "A",
+} as const;
+
+export const SAM_BIZ_GOLD = {
+  plaidAccountId: "fake-sam-bizgold-3434",
+  name: "Business Gold Card",
+  mask: "3434",
+  balance: 0,
+  creditLimit: 12000,
+  owner: "B",
+} as const;
+
 export const SAM_STORE_CARD = {
   plaidAccountId: "fake-sam-store-4444",
   name: "Generic Store Card",

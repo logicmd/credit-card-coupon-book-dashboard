@@ -95,11 +95,14 @@ const RITZ_CARLTON: CreditDef[] = [
 // default (ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
 // entertainment, Walmart+). These are real published benefits of the
 // products below, but they are deliberately NOT part of the seeded catalogs
-// above: import never writes rows for them and postings never auto-match
-// them. Instead, computeDashboard synthesizes dashboard instances for them
+// above: import never writes rows for them, so import-time matching can
+// never assign a posting to them (there is no row id to point at).
+// Instead, computeDashboard synthesizes dashboard instances for them
 // at read time (merged with stored rows — a stored row for the same
-// account + name wins). That is what lets the exclusion preference name
-// them in "Hidden by preference" and un-hide them on ANY deployment —
+// account + name wins) and attributes unassigned postings to those
+// instances by their match patterns, also at read time. That is what
+// lets the exclusion preference name them in "Hidden by preference" and
+// un-hide them on ANY deployment —
 // including long-running ones whose accounts were imported before these
 // families existed and therefore never materialized stored rows.
 // ---------------------------------------------------------------------------
@@ -653,7 +656,9 @@ async function computeDashboard(
       // wins and supplies the persisted state (edited amount / period /
       // active flag, and its postings via postingsByCredit); only defs
       // with no stored row are synthesized, with the catalog amount and
-      // cycle and no postings (0 used). This is what makes credits that
+      // cycle. A synthesized instance starts with no postings of its own —
+      // the attribution step below lends it the unassigned postings its
+      // match pattern claims. This is what makes credits that
       // were never materialized as rows — the default-hidden families on
       // long-running deployments — listable by the exclusion preference
       // below and surfacable again by un-hiding, with no migration.
@@ -697,6 +702,42 @@ async function computeDashboard(
       }
       const effectiveCreditRows = [...creditRows, ...synthesizedRows];
 
+      // Compute-time attribution for synthesized instances. A stored
+      // credit receives its postings persistently: import auto-matches by
+      // pattern, and the user can reassign (or deliberately unassign) by
+      // hand. A synthesized instance has no row a posting could ever
+      // point at — its id is a negative placeholder — so the ONLY way a
+      // posting can count toward it is here, at read time: unassigned
+      // postings are matched against the account's synthesized instances
+      // with the same matchCreditForPosting rule import uses for stored
+      // rows. A posting claimed this way counts toward that instance's
+      // usage (bucketed by transaction date like any assigned posting)
+      // and leaves the Unassigned list. Stored credits never participate:
+      // a posting the user unassigned from a stored credit stays
+      // unassigned, because persisted assignment is the user's state,
+      // not something a read may override. Nothing is written back —
+      // attribution is derived fresh on every read, exactly like
+      // synthesis itself.
+      const synthesizedByAccount = new Map<number, typeof synthesizedRows>();
+      for (const row of synthesizedRows) {
+        const arr = synthesizedByAccount.get(row.accountId) ?? [];
+        arr.push(row);
+        synthesizedByAccount.set(row.accountId, arr);
+      }
+      const effectivePostingsByCredit = new Map(postingsByCredit);
+      const computeMatchedPostingIds = new Set<number>();
+      for (const p of postingRows) {
+        if (p.creditId != null) continue;
+        const candidates = synthesizedByAccount.get(p.accountId);
+        if (!candidates || candidates.length === 0) continue;
+        const match = matchCreditForPosting(candidates, p.name);
+        if (!match) continue;
+        const arr = effectivePostingsByCredit.get(match.id) ?? [];
+        arr.push(p);
+        effectivePostingsByCredit.set(match.id, arr);
+        computeMatchedPostingIds.add(p.id);
+      }
+
       let remainingNow = 0;
       let expiring14 = 0;
       let expiring31 = 0;
@@ -716,7 +757,7 @@ async function computeDashboard(
               ? { month: c.anchorMonth, day: c.anchorDay }
               : null;
           const bounds = periodBounds(period, today, anchor);
-          const mine = postingsByCredit.get(c.id) ?? [];
+          const mine = effectivePostingsByCredit.get(c.id) ?? [];
           // Bucketing is by TRANSACTION date (authorized_date), never the
           // posted date: a credit authorized Sep 30 that posted Oct 2
           // counts in Q3, not Q4.
@@ -773,6 +814,10 @@ async function computeDashboard(
       const unassigned = postingRows
         .filter((p) => {
           if (p.creditId != null) return false;
+          // Attributed at compute time to a synthesized instance (see
+          // above): it counts as that credit's usage, so it is no longer
+          // unassigned even though its stored creditId is still null.
+          if (computeMatchedPostingIds.has(p.id)) return false;
           if (isExcludedName(p.name, excludedPatterns)) return false;
           const acct = accountById.get(p.accountId);
           return acct && acct.ignored === 0;
