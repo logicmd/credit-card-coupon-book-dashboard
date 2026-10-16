@@ -275,22 +275,21 @@ export function parseExcludedPatterns(
 }
 
 /**
- * Whether an exclusion entry plausibly names a real credit: it must share
- * a substring relationship (either way) with a known credit name, so a
- * typo or an invented name is rejected while both the short pattern
- * ("chatgpt") and the full name ("ChatGPT Business Credit") are accepted.
- * Entries under 3 characters match almost everything and are never valid.
+ * Whether an exclusion entry is a CANONICAL entry: exactly (modulo case
+ * and surrounding whitespace) one of the canonical entries the caller
+ * supplies — a hideable family's pattern or label, a full catalog credit
+ * name, or a full stored credit name. Fragments are NOT valid entries:
+ * the read-time matcher treats entries as substrings of credit names,
+ * so a fragment like "credit" or "air" would hide nearly everything;
+ * write-time validation is where that is stopped.
  */
 export function isKnownExclusionEntry(
   entry: string,
-  knownNames: readonly string[],
+  canonicalEntries: readonly string[],
 ): boolean {
   const e = entry.trim().toLowerCase();
-  if (e.length < 3) return false;
-  return knownNames.some((n) => {
-    const name = n.toLowerCase();
-    return name.includes(e) || e.includes(name);
-  });
+  if (e === "") return false;
+  return canonicalEntries.some((n) => n.trim().toLowerCase() === e);
 }
 
 export function isPinnedCredit(name: string): boolean {
@@ -395,19 +394,51 @@ export function issuerForAccountName(accountName: string): string {
 }
 
 /**
- * Duplicate-account detection key: two Plaid records with the same card
- * name, the same non-zero balance, and the same credit limit are two views
- * of one underlying account (e.g. the primary card and a supplementary
- * card record seen from both logins). Returns null when the balance is
- * missing or zero — such records are never auto-flagged as duplicates.
+ * Suspected-duplicate detection — a flag for the user to decide on,
+ * never an automatic action. Two account records are suspected of being
+ * two views of one underlying account (e.g. the primary card and a
+ * supplementary-card record seen from both logins) when either:
+ *  - they share the same product name + mask (computed here, read-time), or
+ *  - import recorded transaction evidence for the pair (a transaction id
+ *    arrived under one record while already stored under the other —
+ *    i.e. one record's transactions are a subset of the other's; the
+ *    evidence is gathered in importSnapshot, since transaction ids are
+ *    globally unique in the store and the subset relation itself can
+ *    therefore never be recomputed from stored postings).
+ * Returns, per account id, the ids it is suspected of duplicating.
+ * Ignored accounts take no part: an account the user already marked as
+ * a duplicate is a settled decision.
  */
-export function accountDuplicateKey(
-  name: string,
-  balance: number | null | undefined,
-  creditLimit: number | null | undefined,
-): string | null {
-  if (balance == null || balance === 0) return null;
-  return `${name}|${balance}|${creditLimit ?? ""}`;
+export function suspectedDuplicatesFor(
+  accounts: readonly { id: number; name: string; mask: string; ignored: number }[],
+  evidencePairs: readonly (readonly [number, number])[],
+): Map<number, number[]> {
+  const active = accounts.filter((a) => a.ignored === 0);
+  const activeIds = new Set(active.map((a) => a.id));
+  const result = new Map<number, number[]>();
+  const add = (id: number, other: number) => {
+    if (id === other || !activeIds.has(id) || !activeIds.has(other)) return;
+    const arr = result.get(id) ?? [];
+    if (!arr.includes(other)) arr.push(other);
+    result.set(id, arr);
+  };
+  const sameProductMask = (
+    a: (typeof active)[number],
+    b: (typeof active)[number],
+  ) =>
+    a.mask !== "" &&
+    a.mask === b.mask &&
+    a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+  for (const a of active) {
+    for (const b of active) {
+      if (b.id !== a.id && sameProductMask(a, b)) add(a.id, b.id);
+    }
+  }
+  for (const [x, y] of evidencePairs) {
+    add(x, y);
+    add(y, x);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -634,18 +665,32 @@ export function laDateOf(iso: string): string | null {
 
 const periodEnum = z.enum(["monthly", "quarterly", "semiannual", "annual"]);
 
+/** A YYYY-MM-DD string that is a REAL calendar date (2026-13-40 is rejected). */
+const dateString = z
+  .string()
+  .refine(isValidCalendarDate, "must be a real calendar date (YYYY-MM-DD)");
+
 const creditView = z.object({
   id: z.number(),
   accountId: z.number(),
   accountName: z.string(),
+  /** User-chosen display prefix for the account ("" when unset). */
+  accountNickname: z.string(),
   mask: z.string(),
   owner: z.string().nullable(),
   name: z.string(),
   amount: z.number(),
+  /** ISO currency code the amounts are in (the account's Plaid currency). */
+  currency: z.string(),
   period: periodEnum,
   /** Anniversary anchor for annual credits; null for calendar-cycle credits. */
   anchorMonth: z.number().nullable(),
   anchorDay: z.number().nullable(),
+  /**
+   * True once a human confirmed the anchor is the card's real
+   * anniversary. Catalog-default anchors start unconfirmed and warn.
+   */
+  anchorConfirmed: z.boolean(),
   enrolled: z.boolean(),
   /**
    * Catalog fact: the issuer requires enrolling in this benefit before
@@ -707,19 +752,37 @@ const dashboardResponse = z.object({
   /** Start of the window the most recent refresh fetched (YYYY-MM-DD). */
   lastRefreshWindowStart: z.string().nullable(),
   today: z.string(),
+  /** The timezone `today` and every period boundary are computed in. */
+  timezone: z.string(),
   accounts: z.array(
     z.object({
       id: z.number(),
       name: z.string(),
+      /** User-chosen display prefix ("" when unset); never set by Plaid. */
+      nickname: z.string(),
       mask: z.string(),
       issuer: z.string(),
+      /** ISO currency code from Plaid; null when unknown (treated as USD). */
+      currency: z.string().nullable(),
       owner: z.string().nullable(),
       balance: z.number().nullable(),
       ignored: z.boolean(),
       hasCatalog: z.boolean(),
+      /** Effective credit instances tracked for this account. */
+      creditCount: z.number(),
+      /**
+       * Read-time suspicion that this record duplicates another one
+       * (same product + mask, or a transaction subset). A prompt for
+       * the user to decide — the account stays active and counted.
+       */
+      suspectedDuplicate: z.boolean(),
+      /** Ids of the accounts this one is suspected of duplicating. */
+      duplicateSuspectIds: z.array(z.number()),
     }),
   ),
   credits: z.array(creditView),
+  /** Total postings in the Unassigned review list (the list itself is capped). */
+  unassignedCount: z.number(),
   unassigned: z.array(
     z.object({
       id: z.number(),
@@ -751,6 +814,167 @@ const okResponse = z.object({ ok: z.literal(true) });
 // Actions
 // ---------------------------------------------------------------------------
 
+type AccountRow = typeof schema.accounts.$inferSelect;
+type CreditRow = typeof schema.credits.$inferSelect;
+
+/**
+ * One catalog credit instance that exists only at read time: a def of an
+ * account's product for which the account has NO stored row (a stored
+ * row — including a deletion tombstone — always wins and suppresses
+ * synthesis). `synthId` is the deterministic negative id the instance
+ * carries in dashboard payloads; the enumeration order here (accounts
+ * in the given order, defs in catalog order) is the single definition
+ * of that mapping, shared by computeDashboard and by the write actions
+ * that resolve a negative id back to its (account, def) to materialize
+ * it (see materializeSynthesizedCredit).
+ */
+export type SynthesizedInstance = {
+  account: AccountRow;
+  def: CreditDef;
+  defIndex: number;
+  synthId: number;
+};
+
+export function synthesizedInstances(
+  accountRows: readonly AccountRow[],
+  creditRows: readonly CreditRow[],
+): SynthesizedInstance[] {
+  const storedNameByAccount = new Map<number, Set<string>>();
+  for (const c of creditRows) {
+    const names = storedNameByAccount.get(c.accountId) ?? new Set<string>();
+    names.add(c.name.trim().toLowerCase());
+    storedNameByAccount.set(c.accountId, names);
+  }
+  const out: SynthesizedInstance[] = [];
+  let synthId = 0;
+  for (const acct of accountRows) {
+    const defs = [
+      ...(catalogFor(acct.name) ?? []),
+      ...nonSeededDefsFor(acct.name),
+    ];
+    if (defs.length === 0) continue;
+    const have = storedNameByAccount.get(acct.id) ?? new Set<string>();
+    defs.forEach((d, i) => {
+      const key = d.name.trim().toLowerCase();
+      if (have.has(key)) return;
+      have.add(key);
+      synthId -= 1;
+      out.push({ account: acct, def: d, defIndex: i, synthId });
+    });
+  }
+  return out;
+}
+
+/** The row-shaped view of a synthesized instance (never persisted as-is). */
+function synthesizedRow(inst: SynthesizedInstance): CreditRow {
+  const d = inst.def;
+  return {
+    id: inst.synthId,
+    accountId: inst.account.id,
+    name: d.name,
+    amount: d.amount,
+    period: d.period,
+    anchorMonth: d.anchorMonth ?? null,
+    anchorDay: d.anchorDay ?? null,
+    // Catalog-default anchors start unconfirmed; enrollment-required
+    // benefits start NOT enrolled (never assume either).
+    anchorConfirmed: d.anchorMonth != null ? 0 : 1,
+    deleted: 0,
+    matchPattern: d.pattern,
+    enrolled: d.enrollmentRequired ? 0 : 1,
+    active: 1,
+    note: d.note ?? "",
+    sortOrder: 10000 + inst.defIndex,
+  };
+}
+
+/**
+ * The stored-row values a catalog def materializes with — shared by
+ * import-time seeding and by materialize-on-write, so a credit behaves
+ * identically however its row came to exist.
+ */
+function defRowValues(accountId: number, d: CreditDef, sortOrder: number) {
+  return {
+    accountId,
+    name: d.name,
+    amount: d.amount,
+    period: d.period,
+    anchorMonth: d.anchorMonth ?? null,
+    anchorDay: d.anchorDay ?? null,
+    anchorConfirmed: d.anchorMonth != null ? 0 : 1,
+    enrolled: d.enrollmentRequired ? 0 : 1,
+    matchPattern: d.pattern,
+    note: d.note ?? "",
+    sortOrder,
+  };
+}
+
+/**
+ * Materialize-on-write: turn a synthesized instance into a real stored
+ * row (copying its catalog def), so an edit / enrolled toggle / stop /
+ * delete aimed at a negative id STICKS instead of silently no-oping.
+ * The account's unassigned postings that the def's pattern claims are
+ * persisted onto the new row — exactly the set compute-time attribution
+ * was lending the instance — so its usage does not drop to zero the
+ * moment it becomes a stored row. Returns the new row.
+ */
+async function materializeSynthesizedCredit(
+  db: SpaceDb<typeof schema>,
+  inst: SynthesizedInstance,
+): Promise<CreditRow> {
+  const inserted = await db
+    .insert(schema.credits)
+    .values(defRowValues(inst.account.id, inst.def, 10000 + inst.defIndex))
+    .returning();
+  const row = inserted[0];
+  if (!row) throw new Error("materializeSynthesizedCredit: insert returned no rows");
+  if (inst.def.pattern !== "") {
+    const unassigned = await db
+      .select()
+      .from(schema.postings)
+      .where(isNull(schema.postings.creditId));
+    for (const p of unassigned) {
+      if (p.accountId !== inst.account.id) continue;
+      if (!p.name.toLowerCase().includes(inst.def.pattern.toLowerCase())) continue;
+      await db
+        .update(schema.postings)
+        .set({ creditId: row.id })
+        .where(eq(schema.postings.id, p.id));
+    }
+  }
+  return row;
+}
+
+/**
+ * Resolve a dashboard payload id to a stored credit row. Positive ids
+ * are looked up directly (deleted tombstones count as missing — they
+ * are gone). Negative ids are synthesized instances: the instance is
+ * resolved through the shared enumeration and materialized on the spot,
+ * so the caller always ends up acting on a real row.
+ */
+async function resolveCreditRow(
+  db: SpaceDb<typeof schema>,
+  id: number,
+): Promise<CreditRow | null> {
+  if (id > 0) {
+    const rows = await db
+      .select()
+      .from(schema.credits)
+      .where(eq(schema.credits.id, id));
+    const row = rows[0];
+    return row && row.deleted === 0 ? row : null;
+  }
+  const [accountRows, creditRows] = await Promise.all([
+    db.select().from(schema.accounts).orderBy(asc(schema.accounts.id)),
+    db.select().from(schema.credits),
+  ]);
+  const inst = synthesizedInstances(accountRows, creditRows).find(
+    (i) => i.synthId === id,
+  );
+  if (!inst) return null;
+  return materializeSynthesizedCredit(db, inst);
+}
+
 /**
  * The dashboard aggregation — the single place where current-period usage,
  * remaining amounts, and totals are computed. The getDashboard action (JSON
@@ -761,13 +985,18 @@ const okResponse = z.object({ ok: z.literal(true) });
 async function computeDashboard(
   db: SpaceDb<typeof schema>,
 ): Promise<z.infer<typeof dashboardResponse>> {
-  const today = todayLA();
       const [accountRows, creditRows, postingRows, metaRows] = await Promise.all([
         db.select().from(schema.accounts).orderBy(asc(schema.accounts.id)),
         db.select().from(schema.credits).orderBy(asc(schema.credits.sortOrder)),
         db.select().from(schema.postings).orderBy(desc(schema.postings.date)),
         db.select().from(schema.meta),
       ]);
+      // "Today" — and therefore every period boundary — is computed in
+      // the user's stored timezone (default America/Los_Angeles).
+      const timezone = resolveTimeZone(
+        metaRows.find((r) => r.key === TIMEZONE_META_KEY)?.value,
+      );
+      const today = todayInTimeZone(timezone);
       const lastImportAt = metaRows.find((r) => r.key === "lastImportAt")?.value ?? null;
       const ownerLabels: [string, string] = [
         metaRows.find((r) => r.key === "ownerALabel")?.value || DEFAULT_OWNER_LABELS[0],
@@ -810,43 +1039,13 @@ async function computeDashboard(
       // below and surfacable again by un-hiding, with no migration.
       // Synthesized instances carry deterministic negative ids so they
       // can never collide with a real row id (postings reference real ids).
-      const storedNameByAccount = new Map<number, Set<string>>();
-      for (const c of creditRows) {
-        const names = storedNameByAccount.get(c.accountId) ?? new Set<string>();
-        names.add(c.name.trim().toLowerCase());
-        storedNameByAccount.set(c.accountId, names);
-      }
-      const synthesizedRows: (typeof creditRows)[number][] = [];
-      let synthId = 0;
-      for (const acct of accountRows) {
-        const defs = [
-          ...(catalogFor(acct.name) ?? []),
-          ...nonSeededDefsFor(acct.name),
-        ];
-        if (defs.length === 0) continue;
-        const have = storedNameByAccount.get(acct.id) ?? new Set<string>();
-        defs.forEach((d, i) => {
-          const key = d.name.trim().toLowerCase();
-          if (have.has(key)) return;
-          have.add(key);
-          synthId -= 1;
-          synthesizedRows.push({
-            id: synthId,
-            accountId: acct.id,
-            name: d.name,
-            amount: d.amount,
-            period: d.period,
-            anchorMonth: d.anchorMonth ?? null,
-            anchorDay: d.anchorDay ?? null,
-            matchPattern: d.pattern,
-            enrolled: 1,
-            active: 1,
-            note: d.note ?? "",
-            sortOrder: 10000 + i,
-          });
-        });
-      }
-      const effectiveCreditRows = [...creditRows, ...synthesizedRows];
+      // DELETED rows are tombstones: they suppress synthesis (so a
+      // deleted credit never resurrects) but are themselves never shown.
+      const synthesizedRows = synthesizedInstances(accountRows, creditRows).map(
+        synthesizedRow,
+      );
+      const liveStoredRows = creditRows.filter((c) => c.deleted === 0);
+      const effectiveCreditRows = [...liveStoredRows, ...synthesizedRows];
 
       // Compute-time attribution for synthesized instances. A stored
       // credit receives its postings persistently: import auto-matches by
@@ -912,8 +1111,16 @@ async function computeDashboard(
             const td = transactionDateOf(p);
             return td >= bounds.start && td <= bounds.end;
           });
+          // Amounts are signed: a clawback (negative posting) nets
+          // against the credits it reverses, restoring remaining.
+          // Remaining is clamped to [0, amount] — a net-negative period
+          // (clawback larger than the period's credits) never shows
+          // more than the full credit as available.
           const used = inPeriod.reduce((s, p) => s + p.amount, 0);
-          const remaining = Math.max(0, Math.round((c.amount - used) * 100) / 100);
+          const remaining = Math.min(
+            c.amount,
+            Math.max(0, Math.round((c.amount - used) * 100) / 100),
+          );
           const daysLeft = daysBetween(today, bounds.end);
 
           // Current period only: past periods are gone and are not tallied,
@@ -929,13 +1136,16 @@ async function computeDashboard(
             id: c.id,
             accountId: c.accountId,
             accountName: acct.name,
+            accountNickname: acct.nickname,
             mask: acct.mask,
             owner: ownerLabelFor(acct.owner, ownerLabels),
             name: c.name,
             amount: c.amount,
+            currency: acct.currency ?? "USD",
             period,
             anchorMonth: c.anchorMonth,
             anchorDay: c.anchorDay,
+            anchorConfirmed: c.anchorConfirmed === 1,
             enrolled: c.enrolled === 1,
             enrollmentRequired: enrollment.required,
             enrollmentNote: enrollment.note,
@@ -960,17 +1170,22 @@ async function computeDashboard(
           };
         });
 
-      const unassigned = postingRows
-        .filter((p) => {
-          if (p.creditId != null) return false;
-          // Attributed at compute time to a synthesized instance (see
-          // above): it counts as that credit's usage, so it is no longer
-          // unassigned even though its stored creditId is still null.
-          if (computeMatchedPostingIds.has(p.id)) return false;
-          if (isExcludedName(p.name, excludedPatterns)) return false;
-          const acct = accountById.get(p.accountId);
-          return acct && acct.ignored === 0;
-        })
+      // The Unassigned review list — the one definition of "unassigned"
+      // every surface agrees on (the dashboard section, its count, and
+      // listUnassignedCount): no credit assigned, not claimed by
+      // compute-time attribution, not an exclusion-hidden name, and on
+      // an account that is not ignored.
+      const unassignedAll = postingRows.filter((p) => {
+        if (p.creditId != null) return false;
+        // Attributed at compute time to a synthesized instance (see
+        // above): it counts as that credit's usage, so it is no longer
+        // unassigned even though its stored creditId is still null.
+        if (computeMatchedPostingIds.has(p.id)) return false;
+        if (isExcludedName(p.name, excludedPatterns)) return false;
+        const acct = accountById.get(p.accountId);
+        return acct && acct.ignored === 0;
+      });
+      const unassigned = unassignedAll
         .slice(0, 100)
         .map((p) => {
           const acct = accountById.get(p.accountId)!;
@@ -1018,6 +1233,17 @@ async function computeDashboard(
             : a.name.localeCompare(b.name),
         );
 
+      // Suspected duplicates (flag only — see suspectedDuplicatesFor):
+      // which records might be two views of one underlying account,
+      // for the user to decide on.
+      const evidenceRows = await db.select().from(schema.accountDuplicateEvidence);
+      const suspected = suspectedDuplicatesFor(
+        accountRows,
+        evidenceRows.map(
+          (r) => [r.accountId, r.otherAccountId] as const,
+        ),
+      );
+
       return {
         lastImportAt,
         ownerLabels,
@@ -1026,17 +1252,24 @@ async function computeDashboard(
         dataCoverageStart,
         lastRefreshWindowStart,
         today,
+        timezone,
         accounts: accountRows.map((a) => ({
           id: a.id,
           name: a.name,
+          nickname: a.nickname,
           mask: a.mask,
           issuer: a.issuer,
+          currency: a.currency,
           owner: ownerLabelFor(a.owner, ownerLabels),
           balance: a.balance,
           ignored: a.ignored === 1,
           hasCatalog: (creditCountByAccount.get(a.id) ?? 0) > 0,
+          creditCount: creditCountByAccount.get(a.id) ?? 0,
+          suspectedDuplicate: suspected.has(a.id),
+          duplicateSuspectIds: suspected.get(a.id) ?? [],
         })),
         credits,
+        unassignedCount: unassignedAll.length,
         unassigned,
         totals: {
           remainingNow: Math.round(remainingNow * 100) / 100,
@@ -1090,9 +1323,9 @@ export const Actions = {
   importSnapshot: defineAction({
     request: z.object({
       /** Start of the window this payload was fetched over (YYYY-MM-DD). */
-      windowStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      windowStart: dateString.optional(),
       /** End of the window this payload was fetched over (YYYY-MM-DD). */
-      windowEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      windowEnd: dateString.optional(),
       /**
        * True only when the source read covered the WHOLE window
        * successfully. Coverage (dataCoverageStart) is claimed from
@@ -1109,11 +1342,18 @@ export const Actions = {
           mask: z.string().default(""),
           balance: z.number().nullable().optional(),
           creditLimit: z.number().nullable().optional(),
-          /** Which login this account belongs to, as a key: "A" or "B". */
+          /**
+           * Which PERSON this account belongs to, as a key: "A" or "B".
+           * Sticky: the import only fills it on accounts that have none
+           * yet — it never overwrites an existing attribution (a person
+           * is corrected through updateAccount, not by a later import).
+           */
           owner: z.string().optional(),
           /** Issuer ("Amex" / "Chase"); inferred from the card name when omitted. */
           issuer: z.string().optional(),
-          /** Explicit duplicate flag from a curated import; wins over the heuristic. */
+          /** ISO currency code from Plaid (balances.iso_currency_code). */
+          currency: z.string().optional(),
+          /** Explicit duplicate flag from a curated import. */
           ignored: z.boolean().optional(),
         }),
       ),
@@ -1122,16 +1362,23 @@ export const Actions = {
           txnId: z.string().min(1),
           accountPlaidId: z.string().min(1),
           /** Posted date (Plaid `date`) — display only. */
-          date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          date: dateString,
           /**
            * Transaction date (Plaid `authorized_date`) — the date the
            * posting counts toward. Falls back to the posted date when
            * absent. Re-importing a known txnId with a different
            * transactionDate corrects the stored value in place.
            */
-          transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          transactionDate: dateString.optional(),
           name: z.string().min(1),
-          amount: z.number().positive(),
+          /**
+           * SIGNED dollars of credit: positive when the issuer paid a
+           * credit, negative when the issuer reversed / clawed one back.
+           * Usage sums signed amounts, so a clawback nets against the
+           * original credit — that is how corrections are represented in
+           * a merge-only store that never deletes.
+           */
+          amount: z.number(),
         }),
       ),
       importedAt: z.string().optional(),
@@ -1149,22 +1396,43 @@ export const Actions = {
     }),
     async handler(ctx, args) {
       const db = ctx.db<typeof schema>();
+      // Strict calendar dates, enforced in the handler (not only in
+      // the request schema): an impossible date like 2026-13-40 must
+      // never reach storage, where string-ordered bucketing would
+      // silently misfile it.
+      for (const [field, value] of [
+        ["windowStart", args.windowStart],
+        ["windowEnd", args.windowEnd],
+      ] as const) {
+        if (value !== undefined && !isValidCalendarDate(value)) {
+          throw new Error(`importSnapshot: ${field} is not a real calendar date: ${value}`);
+        }
+      }
+      for (const p of args.postings) {
+        if (!isValidCalendarDate(p.date)) {
+          throw new Error(`importSnapshot: posting ${p.txnId} has an impossible date: ${p.date}`);
+        }
+        if (p.transactionDate !== undefined && !isValidCalendarDate(p.transactionDate)) {
+          throw new Error(
+            `importSnapshot: posting ${p.txnId} has an impossible transactionDate: ${p.transactionDate}`,
+          );
+        }
+      }
       const existingPostingsCount = (
         await db.select({ id: schema.postings.id }).from(schema.postings)
       ).length;
       const existingAccounts = await db.select().from(schema.accounts);
       const byPlaidId = new Map(existingAccounts.map((a) => [a.plaidAccountId, a]));
 
-      // Duplicate detection: same card name + same non-zero balance + same
-      // limit across the two logins = the same underlying account seen twice
-      // (primary + supplementary views). New duplicates start ignored; the
-      // user can un-ignore them in the Accounts section.
-      const seenKey = new Map<string, number>();
-      for (const a of existingAccounts) {
-        const key = accountDuplicateKey(a.name, a.balance, a.creditLimit);
-        if (key != null) seenKey.set(key, a.id);
-      }
-
+      // Duplicate handling is the USER's decision, never an import-time
+      // guess: import NEVER auto-ignores an account. Two records that
+      // look like the same underlying account (same product + mask, or
+      // one whose transactions are a subset of the other's) are flagged
+      // `suspectedDuplicate` at read time in computeDashboard and listed
+      // in the Cards section and the Agent Markdown warnings; both stay
+      // active and counted until the user marks one ignored via
+      // setAccountIgnored. (An explicit `ignored` in the payload — a
+      // curated import carrying the user's own decision — is honored.)
       let accountsAdded = 0;
       for (const a of args.accounts) {
         const owner = a.owner ?? null;
@@ -1178,18 +1446,19 @@ export const Actions = {
               name: a.name,
               mask: a.mask,
               ...(a.issuer ? { issuer: a.issuer } : {}),
-              ...(owner ? { owner } : {}),
+              ...(a.currency ? { currency: a.currency } : {}),
+              // Owner is STICKY: an import fills it only when the stored
+              // account has none yet. It never overwrites an existing
+              // attribution — the person keys are the user's state, and
+              // a refresh that re-derives them differently must not
+              // silently swap two people's cards.
+              ...(known.owner == null && owner ? { owner } : {}),
               ...(a.ignored !== undefined ? { ignored: a.ignored ? 1 : 0 } : {}),
             })
             .where(eq(schema.accounts.id, known.id));
           continue;
         }
-        let ignored = a.ignored ? 1 : 0;
-        const dupKey = accountDuplicateKey(a.name, a.balance, a.creditLimit);
-        if (!ignored && dupKey != null) {
-          if (seenKey.has(dupKey)) ignored = 1;
-          else seenKey.set(dupKey, -1);
-        }
+        const ignored = a.ignored ? 1 : 0;
         const inserted = await db
           .insert(schema.accounts)
           .values({
@@ -1200,6 +1469,7 @@ export const Actions = {
             creditLimit: a.creditLimit ?? null,
             issuer,
             owner,
+            currency: a.currency ?? null,
             ignored,
           })
           .returning({ id: schema.accounts.id });
@@ -1215,11 +1485,12 @@ export const Actions = {
           creditLimit: a.creditLimit ?? null,
           issuer,
           owner,
+          nickname: "",
+          currency: a.currency ?? null,
           ignored,
           createdAt: new Date(),
         };
         byPlaidId.set(a.plaidAccountId, fresh);
-        if (dupKey != null) seenKey.set(dupKey, row.id);
       }
 
       // Seed catalog credits for any account that has none yet.
@@ -1235,17 +1506,12 @@ export const Actions = {
         if ((creditsByAccount.get(acct.id) ?? []).length > 0) continue;
         const defs = catalogFor(acct.name);
         if (!defs) continue;
-        const rows: (typeof schema.credits.$inferInsert)[] = defs.map((d, i) => ({
-          accountId: acct.id,
-          name: d.name,
-          amount: d.amount,
-          period: d.period,
-          anchorMonth: d.anchorMonth ?? null,
-          anchorDay: d.anchorDay ?? null,
-          matchPattern: d.pattern,
-          note: d.note ?? "",
-          sortOrder: i,
-        }));
+        // Seeded rows start truthful: catalog-default anchors are
+        // UNCONFIRMED placeholders, and enrollment-required benefits
+        // start NOT enrolled (defRowValues carries both rules).
+        const rows: (typeof schema.credits.$inferInsert)[] = defs.map((d, i) =>
+          defRowValues(acct.id, d, i),
+        );
         const insertedCredits = await db
           .insert(schema.credits)
           .values(rows)
@@ -1261,6 +1527,7 @@ export const Actions = {
             .select({
               id: schema.postings.id,
               txnId: schema.postings.txnId,
+              accountId: schema.postings.accountId,
               date: schema.postings.date,
               transactionDate: schema.postings.transactionDate,
             })
@@ -1275,6 +1542,22 @@ export const Actions = {
       for (const p of args.postings) {
         const knownPosting = existingByTxn.get(p.txnId);
         if (knownPosting) {
+          // Duplicate-evidence: this transaction id arrived under a
+          // DIFFERENT account record than the one it is stored under —
+          // the two records saw the same transaction, the signature of
+          // a primary account and its supplementary view. Record the
+          // pair as evidence for the read-time suspectedDuplicate flag
+          // (the user decides; nothing is auto-ignored).
+          const payloadAccount = byPlaidId.get(p.accountPlaidId);
+          if (payloadAccount && payloadAccount.id !== knownPosting.accountId) {
+            await db
+              .insert(schema.accountDuplicateEvidence)
+              .values({
+                accountId: payloadAccount.id,
+                otherAccountId: knownPosting.accountId,
+              })
+              .onConflictDoNothing();
+          }
           // Already stored: never duplicate. The one allowed in-place fix
           // is the transaction date — if this read carries a different
           // authorized_date, correct the stored value so the posting moves
@@ -1298,7 +1581,11 @@ export const Actions = {
           postingsSkipped++;
           continue;
         }
-        const match = matchCreditForPosting(creditsByAccount.get(acct.id) ?? [], p.name);
+        // Deleted (tombstoned) credits never attract postings.
+        const liveCredits = (creditsByAccount.get(acct.id) ?? []).filter(
+          (c) => c.deleted === 0,
+        );
+        const match = matchCreditForPosting(liveCredits, p.name);
         const insertedPosting = await db
           .insert(schema.postings)
           .values({
@@ -1317,6 +1604,7 @@ export const Actions = {
           existingByTxn.set(p.txnId, {
             id: newRow.id,
             txnId: p.txnId,
+            accountId: acct.id,
             date: p.date,
             transactionDate: p.transactionDate ?? null,
           });
@@ -1573,22 +1861,49 @@ export const Actions = {
           hidden: z.boolean(),
         }),
       ),
+      /** The timezone "today" and all period boundaries are computed in. */
+      timezone: z.string(),
     }),
     async handler(ctx) {
       const db = ctx.db<typeof schema>();
-      const rows = await db
-        .select()
-        .from(schema.meta)
-        .where(eq(schema.meta.key, EXCLUDED_CREDITS_META_KEY));
+      const rows = await db.select().from(schema.meta);
       const excludedCredits =
-        parseExcludedPatterns(rows[0]?.value) ?? [...DEFAULT_EXCLUDED_PATTERNS];
+        parseExcludedPatterns(
+          rows.find((r) => r.key === EXCLUDED_CREDITS_META_KEY)?.value,
+        ) ?? [...DEFAULT_EXCLUDED_PATTERNS];
       return {
         excludedCredits,
         hideableFamilies: HIDEABLE_FAMILIES.map((f) => ({
           ...f,
           hidden: isExcludedName(f.label, excludedCredits),
         })),
+        timezone: resolveTimeZone(
+          rows.find((r) => r.key === TIMEZONE_META_KEY)?.value,
+        ),
       };
+    },
+  }),
+
+  // The user's timezone: "today" and every period boundary are computed
+  // in it. Stored in meta; America/Los_Angeles until set.
+  setTimezone: defineAction({
+    request: z.object({
+      timezone: z
+        .string()
+        .refine(isValidTimeZone, "must be a valid IANA timezone name"),
+    }),
+    response: z.object({ timezone: z.string() }),
+    async handler(ctx, args) {
+      const db = ctx.db<typeof schema>();
+      await db
+        .insert(schema.meta)
+        .values({ key: TIMEZONE_META_KEY, value: args.timezone })
+        .onConflictDoUpdate({
+          target: schema.meta.key,
+          set: { value: args.timezone },
+        });
+      ctx.invalidateQueries();
+      return { timezone: args.timezone };
     },
   }),
 
@@ -1605,26 +1920,28 @@ export const Actions = {
         const p = raw.trim().toLowerCase();
         if (p !== "" && !normalized.includes(p)) normalized.push(p);
       }
-      // Validate against every credit name the app knows: the built-in
-      // catalogs, the hideable families behind the defaults, and the
-      // credit rows actually stored (the user may have renamed or added
-      // credits). Unknown names are rejected, so a typo cannot silently
-      // hide the wrong credit — or fail to hide the intended one.
+      // Validation is CANONICAL, not fuzzy: an entry is accepted only
+      // when it is exactly a hideable family's pattern or label, a full
+      // catalog credit name, or a full stored credit name. Fragments
+      // like "credit" or "air" — which the read-time substring matcher
+      // would expand to nearly every credit on the dashboard — are
+      // rejected with a clear error instead of hiding the world.
       const storedNames = (
         await db.select({ name: schema.credits.name }).from(schema.credits)
       ).map((r) => r.name);
-      const knownNames = [
-        ...ALL_CATALOG_CREDIT_NAMES,
+      const canonicalEntries = [
+        ...HIDEABLE_FAMILIES.map((f) => f.pattern),
         ...HIDEABLE_CREDIT_NAMES,
+        ...ALL_CATALOG_CREDIT_NAMES,
         ...storedNames,
       ];
       const unknown = normalized.filter(
-        (p) => !isKnownExclusionEntry(p, knownNames),
+        (p) => !isKnownExclusionEntry(p, canonicalEntries),
       );
       if (unknown.length > 0) {
         throw new Error(
           `setExcludedCredits: unknown credit name(s): ${unknown.join(", ")} — ` +
-            "each entry must match a credit from the catalog or the stored credits",
+            "each entry must be a hideable family pattern or the full name of a credit from the catalog or the stored credits (fragments are not accepted)",
         );
       }
       const value = JSON.stringify(normalized);
@@ -1649,6 +1966,8 @@ export const Actions = {
       /** Anniversary anchor for annual credits; pass null to clear back to calendar-year. */
       anchorMonth: z.number().int().min(1).max(12).nullable().optional(),
       anchorDay: z.number().int().min(1).max(31).nullable().optional(),
+      /** Mark the anchor confirmed (or back to unconfirmed) without changing it. */
+      anchorConfirmed: z.boolean().optional(),
       enrolled: z.boolean().optional(),
       active: z.boolean().optional(),
       note: z.string().optional(),
@@ -1657,18 +1976,44 @@ export const Actions = {
     response: okResponse,
     async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
       const db = ctx.db<typeof schema>();
+      // Materialize-on-write: a negative id is a synthesized instance —
+      // acting on it first creates its stored row, so the edit sticks
+      // instead of silently no-oping against a nonexistent row.
+      const row = await resolveCreditRow(db, args.id);
+      if (!row) throw new Error(`updateCredit: credit ${args.id} not found`);
       const patch: Partial<typeof schema.credits.$inferInsert> = {};
       if (args.name !== undefined) patch.name = args.name;
       if (args.amount !== undefined) patch.amount = args.amount;
       if (args.period !== undefined) patch.period = args.period;
-      if (args.anchorMonth !== undefined) patch.anchorMonth = args.anchorMonth;
-      if (args.anchorDay !== undefined) patch.anchorDay = args.anchorDay;
+      // The anchor is a PAIR: month and day are set together or cleared
+      // together. A half-set anchor is rejected loudly — silently
+      // falling back to the calendar year while the user believes they
+      // set an anniversary cycle is how wrong periods happen.
+      if (args.anchorMonth !== undefined || args.anchorDay !== undefined) {
+        const nextMonth =
+          args.anchorMonth !== undefined ? args.anchorMonth : row.anchorMonth;
+        const nextDay =
+          args.anchorDay !== undefined ? args.anchorDay : row.anchorDay;
+        if ((nextMonth == null) !== (nextDay == null)) {
+          throw new Error(
+            "updateCredit: anchorMonth and anchorDay must be set together (or both cleared) — a half-set anchor is not a valid anniversary anchor",
+          );
+        }
+        patch.anchorMonth = nextMonth;
+        patch.anchorDay = nextDay;
+        // Setting (or clearing) the anchor IS the user deciding it:
+        // the result counts as confirmed.
+        patch.anchorConfirmed = 1;
+      }
+      if (args.anchorConfirmed !== undefined) {
+        patch.anchorConfirmed = args.anchorConfirmed ? 1 : 0;
+      }
       if (args.enrolled !== undefined) patch.enrolled = args.enrolled ? 1 : 0;
       if (args.active !== undefined) patch.active = args.active ? 1 : 0;
       if (args.note !== undefined) patch.note = args.note;
       if (args.matchPattern !== undefined) patch.matchPattern = args.matchPattern;
       if (Object.keys(patch).length > 0) {
-        await db.update(schema.credits).set(patch).where(eq(schema.credits.id, args.id));
+        await db.update(schema.credits).set(patch).where(eq(schema.credits.id, row.id));
         ctx.invalidateQueries();
       }
       return { ok: true as const };
@@ -1689,19 +2034,54 @@ export const Actions = {
     response: z.object({ id: z.number() }),
     async handler(ctx, args) {
       const db = ctx.db<typeof schema>();
+      // The anchor is a pair — both fields or neither (see updateCredit).
+      if ((args.anchorMonth == null) !== (args.anchorDay == null)) {
+        throw new Error(
+          "addCredit: anchorMonth and anchorDay must be set together (or both omitted)",
+        );
+      }
+      const accountRows = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, args.accountId));
+      const account = accountRows[0];
+      if (!account) throw new Error("addCredit: account not found");
+      // Never assume enrollment for a benefit that requires it.
+      const enrollment = enrollmentInfoFor(account.name, args.name);
+      const values = {
+        accountId: args.accountId,
+        name: args.name,
+        amount: args.amount,
+        period: args.period,
+        anchorMonth: args.anchorMonth ?? null,
+        anchorDay: args.anchorDay ?? null,
+        // An anchor the user typed in themselves is confirmed by definition.
+        anchorConfirmed: 1,
+        enrolled: enrollment.required ? 0 : 1,
+        note: args.note,
+        matchPattern: args.matchPattern,
+        sortOrder: 100,
+      };
+      // Re-adding a credit the user once deleted REVIVES its tombstone
+      // instead of inserting a duplicate row beside it.
+      const existing = await db.select().from(schema.credits);
+      const tombstone = existing.find(
+        (c) =>
+          c.accountId === args.accountId &&
+          c.deleted === 1 &&
+          c.name.trim().toLowerCase() === args.name.trim().toLowerCase(),
+      );
+      if (tombstone) {
+        await db
+          .update(schema.credits)
+          .set({ ...values, deleted: 0, active: 1 })
+          .where(eq(schema.credits.id, tombstone.id));
+        ctx.invalidateQueries();
+        return { id: tombstone.id };
+      }
       const inserted = await db
         .insert(schema.credits)
-        .values({
-          accountId: args.accountId,
-          name: args.name,
-          amount: args.amount,
-          period: args.period,
-          anchorMonth: args.anchorMonth ?? null,
-          anchorDay: args.anchorDay ?? null,
-          note: args.note,
-          matchPattern: args.matchPattern,
-          sortOrder: 100,
-        })
+        .values(values)
         .returning({ id: schema.credits.id });
       const row = inserted[0];
       if (!row) throw new Error("addCredit: insert returned no rows");
@@ -1715,11 +2095,22 @@ export const Actions = {
     response: okResponse,
     async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
       const db = ctx.db<typeof schema>();
+      // Materialize-on-write applies to deletion too: deleting a
+      // synthesized instance materializes its row and tombstones it, so
+      // the deletion persists. Deleting a stored row is likewise a
+      // TOMBSTONE (deleted = 1), never a hard delete — otherwise
+      // compute-time synthesis would resurrect the credit on the next
+      // read with catalog defaults, silently undoing the user.
+      const row = await resolveCreditRow(db, args.id);
+      if (!row) throw new Error(`deleteCredit: credit ${args.id} not found`);
       await db
         .update(schema.postings)
         .set({ creditId: null })
-        .where(eq(schema.postings.creditId, args.id));
-      await db.delete(schema.credits).where(eq(schema.credits.id, args.id));
+        .where(eq(schema.postings.creditId, row.id));
+      await db
+        .update(schema.credits)
+        .set({ deleted: 1, active: 0 })
+        .where(eq(schema.credits.id, row.id));
       ctx.invalidateQueries();
       return { ok: true as const };
     },
@@ -1728,18 +2119,24 @@ export const Actions = {
   addManualPosting: defineAction({
     request: z.object({
       creditId: z.number(),
-      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      amount: z.number().positive(),
+      date: dateString,
+      /**
+       * SIGNED amount: positive = credit received, negative = a
+       * clawback / reversal recorded by hand. Zero is meaningless and
+       * rejected.
+       */
+      amount: z.number().refine((v) => v !== 0, "amount must be non-zero"),
       note: z.string().default(""),
     }),
     response: z.object({ id: z.number() }),
     async handler(ctx, args) {
       const db = ctx.db<typeof schema>();
-      const creditRows = await db
-        .select()
-        .from(schema.credits)
-        .where(eq(schema.credits.id, args.creditId));
-      const credit = creditRows[0];
+      if (!isValidCalendarDate(args.date)) {
+        throw new Error(`addManualPosting: not a real calendar date: ${args.date}`);
+      }
+      // A negative creditId is a synthesized instance: materialize it
+      // first so the manual posting has a real row to land on.
+      const credit = await resolveCreditRow(db, args.creditId);
       if (!credit) throw new Error("addManualPosting: credit not found");
       const inserted = await db
         .insert(schema.postings)
@@ -1776,9 +2173,33 @@ export const Actions = {
     response: okResponse,
     async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
       const db = ctx.db<typeof schema>();
+      const postingRows = await db
+        .select()
+        .from(schema.postings)
+        .where(eq(schema.postings.id, args.postingId));
+      const posting = postingRows[0];
+      if (!posting) throw new Error(`assignPosting: posting ${args.postingId} not found`);
+      let creditId: number | null = null;
+      if (args.creditId != null) {
+        // The target must be a real credit ON THE POSTING'S OWN ACCOUNT:
+        // a positive id must exist (and not be a tombstone); a negative
+        // id names a synthesized instance, which is materialized so the
+        // assignment persists. Anything else is an error — a dangling
+        // reference would make the posting vanish from every view.
+        const credit = await resolveCreditRow(db, args.creditId);
+        if (!credit) {
+          throw new Error(`assignPosting: credit ${args.creditId} not found`);
+        }
+        if (credit.accountId !== posting.accountId) {
+          throw new Error(
+            "assignPosting: the credit belongs to a different account than the posting",
+          );
+        }
+        creditId = credit.id;
+      }
       await db
         .update(schema.postings)
-        .set({ creditId: args.creditId })
+        .set({ creditId })
         .where(eq(schema.postings.id, args.postingId));
       ctx.invalidateQueries();
       return { ok: true as const };
@@ -1799,16 +2220,50 @@ export const Actions = {
     },
   }),
 
+  // Per-account user settings that Plaid must never overwrite: the
+  // display nickname (prefix) and — as an explicit user correction, in
+  // contrast to imports, which only ever fill an unset owner — the
+  // owner person key.
+  updateAccount: defineAction({
+    request: z.object({
+      accountId: z.number(),
+      /** Display prefix for the account; "" clears it. */
+      nickname: z.string().trim().max(24).optional(),
+      /** Owner person key ("A" / "B"); null un-attributes the account. */
+      owner: z.string().trim().min(1).max(8).nullable().optional(),
+    }),
+    response: okResponse,
+    async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
+      const db = ctx.db<typeof schema>();
+      const rows = await db
+        .select()
+        .from(schema.accounts)
+        .where(eq(schema.accounts.id, args.accountId));
+      if (!rows[0]) throw new Error(`updateAccount: account ${args.accountId} not found`);
+      const patch: Partial<typeof schema.accounts.$inferInsert> = {};
+      if (args.nickname !== undefined) patch.nickname = args.nickname;
+      if (args.owner !== undefined) patch.owner = args.owner;
+      if (Object.keys(patch).length > 0) {
+        await db
+          .update(schema.accounts)
+          .set(patch)
+          .where(eq(schema.accounts.id, args.accountId));
+        ctx.invalidateQueries();
+      }
+      return { ok: true as const };
+    },
+  }),
+
   listUnassignedCount: defineAction({
     request: z.object({}),
     response: z.object({ count: z.number() }),
     async handler(ctx) {
-      const db = ctx.db<typeof schema>();
-      const rows = await db
-        .select({ id: schema.postings.id })
-        .from(schema.postings)
-        .where(isNull(schema.postings.creditId));
-      return { count: rows.length };
+      // The count IS the dashboard's Unassigned list length — same
+      // filters (ignored accounts, compute-time attribution, exclusion
+      // names), computed by the same function, so the two can never
+      // disagree the way a raw creditId-null count did.
+      const data = await computeDashboard(ctx.db<typeof schema>());
+      return { count: data.unassignedCount };
     },
   }),
 } satisfies ActionsModule;

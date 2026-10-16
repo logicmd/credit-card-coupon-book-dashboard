@@ -126,3 +126,19 @@ export const meta = sqliteTable("meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+/**
+ * Import-time duplicate evidence: a row (accountId, otherAccountId)
+ * means "a Plaid transaction id arrived under accountId but was already
+ * stored under otherAccountId" — the two records saw the same
+ * transaction, the signature of a primary account and its
+ * supplementary-card view across logins. Evidence only: it feeds the
+ * read-time `suspectedDuplicate` flag; nothing is ever auto-ignored.
+ */
+export const accountDuplicateEvidence = sqliteTable(
+  "account_duplicate_evidence",
+  {
+    accountId: integer("account_id").notNull(),
+    otherAccountId: integer("other_account_id").notNull(),
+  },
+);

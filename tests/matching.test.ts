@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  accountDuplicateKey,
   catalogFor,
   matchCreditForPosting,
+  suspectedDuplicatesFor,
 } from "../server/src/actions";
 
 describe("matchCreditForPosting — posting name to credit auto-mapping", () => {
@@ -55,28 +55,68 @@ describe("matchCreditForPosting — posting name to credit auto-mapping", () => 
   });
 });
 
-describe("accountDuplicateKey — duplicate account record detection", () => {
-  test("same name + non-zero balance + same limit produces a key", () => {
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", 300, 5000)).toBe(
-      "Hilton Honors Aspire Card|300|5000",
-    );
+describe("suspectedDuplicatesFor — duplicate suspicion is a flag, never a guess acted on", () => {
+  // SEMANTICS CHANGED (fix package): duplicates used to be GUESSED at
+  // import from name + balance + limit and auto-ignored. Now suspicion
+  // is computed from product + mask (balance is irrelevant — it drifts)
+  // plus import-recorded transaction evidence, and it only ever FLAGS
+  // accounts for the user to resolve.
+  const acct = (id: number, name: string, mask: string, ignored = 0) => ({
+    id,
+    name,
+    mask,
+    ignored,
   });
 
-  test("a null limit is part of the key as an empty suffix", () => {
-    expect(accountDuplicateKey("Business Platinum Card®", 42, null)).toBe(
-      "Business Platinum Card®|42|",
-    );
+  test("same product + mask suspects both records of each other", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111"),
+      acct(2, "Hilton Honors Aspire Card", "1111"),
+    ];
+    const res = suspectedDuplicatesFor(accounts, []);
+    expect(res.get(1)).toEqual([2]);
+    expect(res.get(2)).toEqual([1]);
   });
 
-  test("zero or missing balance is never a duplicate key", () => {
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", 0, 5000)).toBeNull();
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", null, 5000)).toBeNull();
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", undefined, 5000)).toBeNull();
+  test("same product with a different mask is not suspected (two holders, one product)", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111"),
+      acct(2, "Hilton Honors Aspire Card", "2222"),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).size).toBe(0);
   });
 
-  test("different balance or limit means a different key", () => {
-    const base = accountDuplicateKey("Hilton Honors Aspire Card", 300, 5000);
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", 301, 5000)).not.toBe(base);
-    expect(accountDuplicateKey("Hilton Honors Aspire Card", 300, 6000)).not.toBe(base);
+  test("an empty mask never suspects (nothing to key on)", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", ""),
+      acct(2, "Hilton Honors Aspire Card", ""),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).size).toBe(0);
+  });
+
+  test("name matching is case-insensitive and trimmed", () => {
+    const accounts = [
+      acct(1, "hilton honors aspire card ", "1111"),
+      acct(2, "Hilton Honors Aspire Card", "1111"),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).get(1)).toEqual([2]);
+  });
+
+  test("transaction evidence suspects both sides of the pair, whatever the masks", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111"),
+      acct(2, "Hilton Honors Aspire Card", "9999"),
+    ];
+    const res = suspectedDuplicatesFor(accounts, [[2, 1]]);
+    expect(res.get(1)).toEqual([2]);
+    expect(res.get(2)).toEqual([1]);
+  });
+
+  test("ignored accounts take no part — a settled decision is not re-flagged", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111"),
+      acct(2, "Hilton Honors Aspire Card", "1111", 1),
+    ];
+    expect(suspectedDuplicatesFor(accounts, [[1, 2]]).size).toBe(0);
   });
 });
