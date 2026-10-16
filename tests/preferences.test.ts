@@ -144,7 +144,7 @@ describe("exclusion preference — defaults", () => {
     expect(md).toContain("## Hidden by preference");
     expect(md).toContain("not counted in any total above");
     expect(md).toContain(
-      "- ChatGPT Business Credit — Alex · Business Platinum Card® ··3333",
+      "- ChatGPT Business Credit — Alex 3333 · Business Platinum Card®",
     );
     expect(md).toContain(
       "Exclusion entries in force: chatgpt, indeed, adobe, clear, equinox, entertainment, walmart, instacart",

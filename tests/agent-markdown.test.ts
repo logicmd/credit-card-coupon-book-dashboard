@@ -20,6 +20,7 @@ function credit(overrides: Partial<Credit>): Credit {
     accountId: 1,
     accountName: "Business Platinum Card®",
     mask: "3333",
+    fifthDigit: "",
     owner: "Alex",
     name: "Wireless Credit",
     amount: 10,
@@ -164,7 +165,7 @@ function sampleDashboard(): DashboardData {
     ownerLabels: ["Alex", "Sam"],
     excludedPatterns: ["chatgpt", "indeed", "adobe", "clear", "equinox", "entertainment", "walmart"],
     hiddenCredits: [
-      { name: "ChatGPT Business Credit", accountName: "Business Platinum Card®", mask: "3333", owner: "Alex" },
+      { name: "ChatGPT Business Credit", accountName: "Business Platinum Card®", mask: "3333", fifthDigit: "", owner: "Alex" },
     ],
     dataCoverageStart: "2026-01-01",
     lastRefreshWindowStart: "2026-09-16",
@@ -227,8 +228,8 @@ describe("renderAgentMarkdown", () => {
     );
     expect(md.match(/^- Enrollment required:/gm)).toHaveLength(1);
     // Card identity: owner login label + product name + mask.
-    expect(md).toContain("### Travel Credit — Alex · The Ritz-Carlton® Credit Card ··9999");
-    expect(md).toContain("### Flight Credit — Sam · Hilton Honors Aspire Card ··2222");
+    expect(md).toContain("### Travel Credit — Alex 9999 · The Ritz-Carlton® Credit Card");
+    expect(md).toContain("### Flight Credit — Sam 2222 · Hilton Honors Aspire Card");
     // Posting provenance: Plaid imports vs manual entries, and the posted
     // date is annotated when it differs from the transaction date.
     expect(md).toContain('2026-10-03 "AMEX Flight Credit" $20 (Plaid)');
@@ -242,7 +243,7 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("## Hidden by preference");
     expect(md).toContain("not counted in any total above");
     // The hidden credit is named with its card so an assistant can manage it.
-    expect(md).toContain("- ChatGPT Business Credit — Alex · Business Platinum Card® ··3333");
+    expect(md).toContain("- ChatGPT Business Credit — Alex 3333 · Business Platinum Card®");
     expect(md).toContain(
       "Exclusion entries in force: chatgpt, indeed, adobe, clear, equinox, entertainment, walmart",
     );
@@ -310,8 +311,8 @@ describe("getAgentMarkdown action", () => {
     expect(dash.totals.remainingNow).toBe(230);
     expect(md).toContain("Total unused in current periods: $230 across 2 open credits");
     // Labels, rules, and Plaid provenance come through end to end.
-    expect(md).toContain("Alex · Hilton Honors Aspire Card ··1111");
-    expect(md).toContain("Sam · Hilton Honors Aspire Card ··2222");
+    expect(md).toContain("Alex 1111 · Hilton Honors Aspire Card");
+    expect(md).toContain("Sam 2222 · Hilton Honors Aspire Card");
     expect(md).toContain("How to use: Flights booked directly with airlines or Amex Travel");
     expect(md).toContain("(Plaid)");
     // Open credits first; used-up ones (with renewal dates) in their section.
@@ -356,7 +357,7 @@ describe("renderAgentMarkdown — warnings, accounts, currency", () => {
     // Accounts section: every account is visible; the unsupported one
     // is named as having no supported credits tracked.
     expect(md).toContain("## Accounts");
-    expect(md).toContain("Some Unsupported Card ··0000 — no supported credits tracked");
+    expect(md).toContain("Sam 0000 · Some Unsupported Card — no supported credits tracked");
   });
 
   test("unconfirmed anchors, suspected duplicates, and unidentified logins all warn", () => {
@@ -378,8 +379,11 @@ describe("renderAgentMarkdown — warnings, accounts, currency", () => {
     const md = renderAgentMarkdown(data, GENERATED_AT);
     expect(md).toContain("Anchor not confirmed: Annual Hotel Credit");
     expect(md).toContain("catalog-default anniversary anchor (May 1)");
-    expect(md).toContain("Possible duplicate account: Business Platinum Card® ··3333");
-    expect(md).toContain("Login not identified yet: Business Platinum Card® ··3333");
+    expect(md).toContain("Possible duplicate account: Alex 3333 · Business Platinum Card®");
+    expect(md).toContain("Login not identified yet: 3333 · Business Platinum Card®");
+    // These two records have DIFFERENT owners, so the same-ending
+    // heuristic is not what links them — no fifth-digit guidance.
+    expect(md).not.toContain("record each card's fifth digit");
   });
 
   test("a nickname stands in for the product name in credit labels", () => {
@@ -387,7 +391,65 @@ describe("renderAgentMarkdown — warnings, accounts, currency", () => {
     const flight = data.credits.find((c) => c.name === "Flight Credit")!;
     flight.accountNickname = "Asp2";
     const md = renderAgentMarkdown(data, GENERATED_AT);
-    expect(md).toContain("### Flight Credit — Sam · Asp2 ··2222");
+    expect(md).toContain("### Flight Credit — Sam 2222 · Asp2");
+  });
+
+  test("a recorded fifth digit renders the five-digit ending in labels", () => {
+    const data = sampleDashboard();
+    const flight = data.credits.find((c) => c.name === "Flight Credit")!;
+    flight.fifthDigit = "4"; // fictional digit; mask 2222 → ending 42222
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("### Flight Credit — Sam 42222 · Hilton Honors Aspire Card");
+    // A credit without a recorded digit keeps the plain four-digit ending.
+    expect(md).toContain("### Travel Credit — Alex 9999 · The Ritz-Carlton® Credit Card");
+  });
+
+  test("the duplicate warning for same-owner same-ending cards points at the fifth digit", () => {
+    const data = sampleDashboard();
+    data.accounts = [
+      {
+        id: 1, name: "Hilton Honors Aspire Card", mask: "6666", fifthDigit: "", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 2, suspectedDuplicate: true, duplicateSuspectIds: [2],
+        disambiguation: null,
+      },
+      {
+        id: 2, name: "Hilton Honors Aspire Card", mask: "6666", fifthDigit: "", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 2, suspectedDuplicate: true, duplicateSuspectIds: [1],
+        disambiguation: null,
+      },
+    ] as any;
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain(
+      "Possible duplicate account: Alex 6666 · Hilton Honors Aspire Card may be the same " +
+        "underlying card as Alex 6666 · Hilton Honors Aspire Card",
+    );
+    expect(md).toContain("record each card's fifth digit");
+    expect(md).toContain("five-digit ending in your issuer's app");
+    expect(md).toContain("cards whose five-digit endings differ are no longer flagged");
+  });
+
+  test("once the five-digit endings differ, labels show both cards distinctly", () => {
+    const data = sampleDashboard();
+    data.accounts = [
+      {
+        id: 1, name: "Hilton Honors Aspire Card", mask: "6666", fifthDigit: "2", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 2, suspectedDuplicate: false, duplicateSuspectIds: [],
+        disambiguation: null,
+      },
+      {
+        id: 2, name: "Hilton Honors Aspire Card", mask: "6666", fifthDigit: "7", owner: "Alex",
+        nickname: "", currency: null, balance: 0, creditLimit: null,
+        ignored: false, creditCount: 2, suspectedDuplicate: false, duplicateSuspectIds: [],
+        disambiguation: null,
+      },
+    ] as any;
+    const md = renderAgentMarkdown(data, GENERATED_AT);
+    expect(md).toContain("- Alex 26666 · Hilton Honors Aspire Card");
+    expect(md).toContain("- Alex 76666 · Hilton Honors Aspire Card");
+    expect(md).not.toContain("Possible duplicate account");
   });
 
   test("non-USD credits render amounts in their currency", () => {

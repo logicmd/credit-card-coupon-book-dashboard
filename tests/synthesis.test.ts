@@ -123,7 +123,7 @@ describe("synthesis — hideable catalog credit with no stored row and no postin
     let md: string = (await Actions.getAgentMarkdown.handler(ctx, {}) as any).markdown;
     expect(md).toContain("## Hidden by preference");
     expect(md).toContain(
-      "- ChatGPT Business Credit — Alex · Business Platinum Card® ··3333",
+      "- ChatGPT Business Credit — Alex 3333 · Business Platinum Card®",
     );
     expect(md).not.toContain("### ChatGPT Business Credit");
 
@@ -136,7 +136,7 @@ describe("synthesis — hideable catalog credit with no stored row and no postin
     expect(md).toContain("$300 credit · $0 used · $300 remaining · available");
     expect(md).not.toContain("- ChatGPT Business Credit — ");
     // The still-hidden families keep their section (and their names).
-    expect(md).toContain("- Indeed Credit — Alex · Business Platinum Card® ··3333");
+    expect(md).toContain("- Indeed Credit — Alex 3333 · Business Platinum Card®");
   });
 });
 

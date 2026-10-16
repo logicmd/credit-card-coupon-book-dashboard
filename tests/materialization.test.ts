@@ -237,7 +237,7 @@ describe("account nicknames — user-owned display prefixes", () => {
     expect(dash.accounts[0].nickname).toBe("Asp");
 
     const md: string = ((await Actions.getAgentMarkdown.handler(ctx, {})) as any).markdown;
-    expect(md).toContain("Asp ··1111");
+    expect(md).toContain("Login 1 1111 · Asp");
     expect(md).toContain('shown as "Asp"');
   });
 

@@ -60,12 +60,25 @@ describe("suspectedDuplicatesFor — duplicate suspicion is a flag, never a gues
   // import from name + balance + limit and auto-ignored. Now suspicion
   // is computed from product + mask (balance is irrelevant — it drifts)
   // plus import-recorded transaction evidence, and it only ever FLAGS
-  // accounts for the user to resolve.
-  const acct = (id: number, name: string, mask: string, ignored = 0) => ({
+  // accounts for the user to resolve. FIFTH-DIGIT EXTENSION: the
+  // heuristic compares EFFECTIVE endings (the recorded fifth digit
+  // counts) and is scoped within one owner — the owner label already
+  // distinguishes two people's same-ending cards, so they never flag
+  // each other on the heuristic. Transaction evidence, the stronger
+  // signal, still applies regardless of owner.
+  const acct = (
+    id: number,
+    name: string,
+    mask: string,
+    ignored = 0,
+    extra: { owner?: string | null; fifthDigit?: string } = {},
+  ) => ({
     id,
     name,
     mask,
     ignored,
+    owner: extra.owner === undefined ? "A" : extra.owner,
+    fifthDigit: extra.fifthDigit ?? "",
   });
 
   test("same product + mask suspects both records of each other", () => {
@@ -74,6 +87,50 @@ describe("suspectedDuplicatesFor — duplicate suspicion is a flag, never a gues
       acct(2, "Hilton Honors Aspire Card", "1111"),
     ];
     const res = suspectedDuplicatesFor(accounts, []);
+    expect(res.get(1)).toEqual([2]);
+    expect(res.get(2)).toEqual([1]);
+  });
+
+  test("same product + mask under DIFFERENT owners is not suspected — the owner label already distinguishes them", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111", 0, { owner: "A" }),
+      acct(2, "Hilton Honors Aspire Card", "1111", 0, { owner: "B" }),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).size).toBe(0);
+  });
+
+  test("different fifth digits clear the suspicion: the five-digit endings differ", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "6006", 0, { fifthDigit: "2" }),
+      acct(2, "Hilton Honors Aspire Card", "6006", 0, { fifthDigit: "7" }),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).size).toBe(0);
+  });
+
+  test("the SAME fifth digit keeps the suspicion: the effective endings still agree", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "6006", 0, { fifthDigit: "2" }),
+      acct(2, "Hilton Honors Aspire Card", "6006", 0, { fifthDigit: "2" }),
+    ];
+    const res = suspectedDuplicatesFor(accounts, []);
+    expect(res.get(1)).toEqual([2]);
+    expect(res.get(2)).toEqual([1]);
+  });
+
+  test("recording just one card's digit already separates it from the unrecorded twin", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "6006", 0, { fifthDigit: "2" }),
+      acct(2, "Hilton Honors Aspire Card", "6006"),
+    ];
+    expect(suspectedDuplicatesFor(accounts, []).size).toBe(0);
+  });
+
+  test("transaction evidence still suspects a pair across owners — it is the stronger signal", () => {
+    const accounts = [
+      acct(1, "Hilton Honors Aspire Card", "1111", 0, { owner: "A" }),
+      acct(2, "Hilton Honors Aspire Card", "2222", 0, { owner: "B" }),
+    ];
+    const res = suspectedDuplicatesFor(accounts, [[1, 2]]);
     expect(res.get(1)).toEqual([2]);
     expect(res.get(2)).toEqual([1]);
   });
