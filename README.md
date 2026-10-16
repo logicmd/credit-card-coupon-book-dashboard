@@ -37,7 +37,7 @@ The intended workflow is to let your own Muse (or another AI assistant) prepare 
 - **Transaction-date attribution** — a credit counts toward the period of the underlying transaction (`authorized_date`), not the day the issuer posted it. A Hilton charge on Sep 30 whose credit posts Oct 2 counts in Q3, not Q4. Both dates are stored (the posted date is display-only), and a later import can correct a transaction date in place.
 - **Anniversary-year cycles** — credits whose program runs on your cardmember year (e.g. Chase Sapphire Preferred's hotel credit, World of Hyatt Business) carry an anchor date and run anchor-to-anchor (May 1 – Apr 30) instead of Jan 1 – Dec 31.
 - **Merged view** — the same credit on six cards shows as one row with the combined total; expand it to see each card.
-- **Two logins supported** — households often have cards spread across two Amex logins (e.g. you and your spouse). Each account is tagged with its login; labels are configurable ("Login 1" / "Login 2" by default). Summary totals are always combined.
+- **Household logins, grouped by person** — cards are often spread across several logins (two people × Amex + Chase). Each account is tagged with its person's key; labels are configurable ("Login 1" / "Login 2" by default), and one person's Amex and Chase logins share their label. Labels can be set or corrected any time — easiest after the first import, when the accounts make it obvious whose login is whose. Summary totals are always combined.
 - **Only what you can still use** — the dashboard focuses on the current period. Used-up credits collapse behind a toggle. Credits you do not care about never appear: an exclusion list (built-in defaults, then your own stored preference) hides them. The list is yours to choose — flip the toggles in the page's Display settings section, or just ask your Muse in chat; both edit the same stored preference.
 - **Incremental refresh** — daily refresh pulls only the last 30 days from Plaid and merges by transaction ID. Nothing already stored is ever deleted; a coverage-start marker shows how far back your data goes. If coverage is incomplete, refresh bootstraps from Jan 1 of the current year first.
 - **Share with a friend** — the header's Share button shows a ready-to-paste Muse prompt: a friend pastes it into their own Muse and gets their own private dashboard from this repo, connected to their own Plaid. It shares the product, never your data.
@@ -48,7 +48,7 @@ This app is built to run as a Muse web artifact. The fastest path:
 
 1. Paste this repo's URL into your Muse chat.
 2. Say: **"Set this up for me — follow SETUP_FOR_MUSE.md."**
-3. Your Muse will create the app, ask you to connect your Amex account(s) through Plaid, ask what to call your two logins, and run the first import.
+3. Your Muse will create the app, ask you to connect your bank logins through Plaid, ask whose login is whose and what to call each person, run the first import, and reconcile the result with you (accounts per person, anniversary anchors to confirm, credits that still need enrollment, any unassigned postings).
 
 See [SETUP_FOR_MUSE.md](SETUP_FOR_MUSE.md) for the exact playbook your Muse will follow.
 
