@@ -56,7 +56,7 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 
 - `server/src/actions.ts` — data actions: `importSnapshot` (merge-only Plaid import), `refreshCredits` (spawns the incremental 30-day refresh), `getDashboard`, credit/posting CRUD, `setOwnerLabels`.
 - `server/src/schema.ts` — accounts, credits, postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`).
-- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Uber One credits, the discontinued Brilliant property credit, and Saks.
+- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Excluded by default (display preference, easy to change in `EXCLUDED_NAME_PATTERNS`): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Instacart, Uber One credits, the discontinued Brilliant property credit, and Saks.
 
 ## Tests
 

@@ -49,7 +49,7 @@ describe("exclusion preference — defaults", () => {
     const db = createTestDb();
     const prefs: any = await Actions.getPreferences.handler(fakeCtx(db), {});
     // The Display settings toggles render from exactly this list: the
-    // seven default-hidden families report hidden, the two opt-in
+    // eight default-hidden families report hidden, the two opt-in
     // families (Global Entry, FareLock) report shown.
     expect(prefs.hideableFamilies).toEqual([
       { pattern: "chatgpt", label: "ChatGPT Business Credit", hidden: true },
@@ -59,6 +59,7 @@ describe("exclusion preference — defaults", () => {
       { pattern: "equinox", label: "Equinox Credit", hidden: true },
       { pattern: "entertainment", label: "Digital Entertainment Credit", hidden: true },
       { pattern: "walmart", label: "Walmart+ Credit", hidden: true },
+      { pattern: "instacart", label: "Instacart Credit", hidden: true },
       { pattern: "global entry", label: "Global Entry Credit", hidden: false },
       { pattern: "farelock", label: "FareLock Credit", hidden: false },
     ]);
@@ -96,6 +97,45 @@ describe("exclusion preference — defaults", () => {
     expect(dash.totals.remainingNow).toBe(710);
   });
 
+  test("Instacart is hidden by default and can be un-hidden and re-hidden by name", async () => {
+    const { ctx } = await seedBizPlatWithHiddenCredit();
+    const dash0: any = await Actions.getDashboard.handler(ctx, {});
+    await Actions.addCredit.handler(ctx, {
+      accountId: dash0.accounts[0].id,
+      name: "Instacart Credit",
+      amount: 10,
+      period: "monthly",
+      note: "Instacart credit",
+      matchPattern: "instacart",
+    });
+
+    // Default-hidden: named in Hidden by preference, counted nowhere.
+    let dash: any = await Actions.getDashboard.handler(ctx, {});
+    expect(dash.credits.map((c: any) => c.name)).not.toContain("Instacart Credit");
+    expect(dash.hiddenCredits.map((h: any) => h.name)).toContain("Instacart Credit");
+    expect(dash.totals.remainingNow).toBe(710);
+
+    // Un-hide: drop just the "instacart" entry from the effective list.
+    const prefs: any = await Actions.getPreferences.handler(ctx, {});
+    await Actions.setExcludedCredits.handler(ctx, {
+      excludedCredits: prefs.excludedCredits.filter((p: string) => p !== "instacart"),
+    });
+    dash = await Actions.getDashboard.handler(ctx, {});
+    expect(dash.credits.map((c: any) => c.name)).toContain("Instacart Credit");
+    expect(dash.totals.remainingNow).toBe(720);
+
+    // Re-hide by passing the "instacart" pattern itself: validation
+    // accepts it because Instacart is one of the hideable families.
+    const prefs2: any = await Actions.getPreferences.handler(ctx, {});
+    const res: any = await Actions.setExcludedCredits.handler(ctx, {
+      excludedCredits: [...prefs2.excludedCredits, "instacart"],
+    });
+    expect(res.excludedCredits).toContain("instacart");
+    dash = await Actions.getDashboard.handler(ctx, {});
+    expect(dash.credits.map((c: any) => c.name)).not.toContain("Instacart Credit");
+    expect(dash.totals.remainingNow).toBe(710);
+  });
+
   test("the Agent Markdown names the hidden credits under 'Hidden by preference'", async () => {
     const { ctx } = await seedBizPlatWithHiddenCredit();
     await Actions.setOwnerLabels.handler(ctx, { aLabel: "Alex" });
@@ -107,7 +147,7 @@ describe("exclusion preference — defaults", () => {
       "- ChatGPT Business Credit — Alex · Business Platinum Card® ··3333",
     );
     expect(md).toContain(
-      "Exclusion entries in force: chatgpt, indeed, adobe, clear, equinox, entertainment, walmart",
+      "Exclusion entries in force: chatgpt, indeed, adobe, clear, equinox, entertainment, walmart, instacart",
     );
     // Named as hidden only — never rendered as a tracked credit block.
     expect(md).not.toContain("### ChatGPT Business Credit");

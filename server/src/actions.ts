@@ -149,7 +149,7 @@ export function nonSeededDefsFor(accountName: string): CreditDef[] {
 //   the preference has never been set,
 //   DEFAULT_EXCLUDED_PATTERNS applies — the built-in list covering
 //   ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
-//   entertainment, and Walmart+. Once the user saves their own selection
+//   entertainment, Walmart+, and Instacart. Once the user saves their own selection
 //   (including an empty one = show everything), it is authoritative and
 //   the built-in list never applies again.
 //   The list is NOT hardcoded: the dashboard page has a Display settings
@@ -175,6 +175,7 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
   "equinox",
   "entertainment",
   "walmart",
+  "instacart",
 ];
 
 /**
@@ -182,7 +183,7 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
  * list behind the dashboard's Display settings section. `pattern` is the
  * exclusion entry toggling the family on writes into the preference;
  * `label` is the human-readable credit name shown next to the toggle.
- * The first seven are the families the built-in defaults hide; the rest
+ * The first eight are the families the built-in defaults hide; the rest
  * start out shown but can be hidden the same way.
  * setExcludedCredits validation accepts an entry when it matches one of
  * these labels (or a catalog / stored credit name).
@@ -195,6 +196,7 @@ export const HIDEABLE_FAMILIES: { pattern: string; label: string }[] = [
   { pattern: "equinox", label: "Equinox Credit" },
   { pattern: "entertainment", label: "Digital Entertainment Credit" },
   { pattern: "walmart", label: "Walmart+ Credit" },
+  { pattern: "instacart", label: "Instacart Credit" },
   { pattern: "global entry", label: "Global Entry Credit" },
   { pattern: "farelock", label: "FareLock Credit" },
 ];

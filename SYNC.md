@@ -63,7 +63,7 @@ just faster — repo, test, push, deploy.
   stored credit rows (keyed by account + credit name; a stored row
   wins). A credit therefore needs no stored row to be shown, hidden, or
   un-hidden — the default-hidden families (ChatGPT Business, Indeed,
-  Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+) are named in
+  Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Instacart) are named in
   "Hidden by preference" and resurface when their pattern is removed,
   even on deployments whose accounts were imported before those
   families existed. Synthesis never writes to the database.

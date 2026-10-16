@@ -31,7 +31,7 @@ Open the app and trigger `refreshCredits`. With an empty database it performs a 
 
 ## 5. Ask: which credits to hide?
 
-Some credits are hidden by default — the built-in list covers ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, and Walmart+. Hidden credits never appear on the dashboard and never count in any total. They do not need a stored database row to exist: the dashboard synthesizes every catalog credit for every account at read time (a stored row, when present, supplies the saved state and its postings still count as assigned), so removing a credit's entry from the preference below always brings it back — even on accounts imported before that credit family was tracked.
+Some credits are hidden by default — the built-in list covers ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, and Instacart. Hidden credits never appear on the dashboard and never count in any total. They do not need a stored database row to exist: the dashboard synthesizes every catalog credit for every account at read time (a stored row, when present, supplies the saved state and its postings still count as assigned), so removing a credit's entry from the preference below always brings it back — even on accounts imported before that credit family was tracked.
 
 Hiding is a **stored preference, not a code setting**: it lives in the app's meta table under the key `excludedCredits` (a JSON list of lowercase name patterns). The user can change it themselves in the web page's Display settings section (one toggle per hideable family) or by asking you in chat — both paths go through the same two actions below, and a selection the user saves is authoritative (the built-in defaults only apply until something is stored):
 
