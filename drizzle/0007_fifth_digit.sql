@@ -1,0 +1,1 @@
+ALTER TABLE accounts ADD COLUMN fifth_digit TEXT NOT NULL DEFAULT '';

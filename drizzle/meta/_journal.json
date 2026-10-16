@@ -43,6 +43,13 @@
       "when": 1792060500000,
       "tag": "0006_duplicate_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792061000000,
+      "tag": "0007_fifth_digit",
+      "breakpoints": true
     }
   ]
 }

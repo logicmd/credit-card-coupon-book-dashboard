@@ -35,6 +35,16 @@ export const accounts = sqliteTable("accounts", {
    * which is exactly why the stable user label lives in its own column).
    */
   nickname: text("nickname").notNull().default(""),
+  /**
+   * The digit immediately before the card's last four — the
+   * fifth-from-last digit of the card number — recorded by the user to
+   * tell apart one person's same-product cards that share a mask (a
+   * household can hold three Aspires all ending 1003; the issuers' apps
+   * show a five-digit ending, 41003 vs 81003, that distinguishes them).
+   * "" until recorded. Like the nickname, it is set only through
+   * updateAccount and imports never touch it.
+   */
+  fifthDigit: text("fifth_digit").notNull().default(""),
   /** ISO currency code from Plaid (balances.iso_currency_code); null → USD. */
   currency: text("currency"),
   /**

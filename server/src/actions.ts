@@ -9,7 +9,7 @@
 import { defineAction, z, type ActionsModule, type SpaceDb } from "@hatch/space-sdk";
 import { asc, desc, eq, isNull } from "drizzle-orm";
 import * as schema from "./schema";
-import { renderAgentMarkdown } from "./agentMarkdown";
+import { effectiveEnding, renderAgentMarkdown } from "./agentMarkdown";
 
 // ---------------------------------------------------------------------------
 // Catalog seed: current published Amex benefit terms per card product.
@@ -398,19 +398,34 @@ export function issuerForAccountName(accountName: string): string {
  * never an automatic action. Two account records are suspected of being
  * two views of one underlying account (e.g. the primary card and a
  * supplementary-card record seen from both logins) when either:
- *  - they share the same product name + mask (computed here, read-time), or
+ *  - the same-ending heuristic fires (computed here, read-time): same
+ *    product name + same EFFECTIVE ending (the mask, with the
+ *    user-recorded fifth digit counting — two records whose five-digit
+ *    endings differ are demonstrably different cards) + the SAME owner.
+ *    The heuristic never crosses owners: the owner label already tells
+ *    two people's same-ending cards apart, so a spouse's card needs no
+ *    marking (and no fifth digit). Unattributed records (owner null)
+ *    form one bucket, like any other owner.
  *  - import recorded transaction evidence for the pair (a transaction id
  *    arrived under one record while already stored under the other —
  *    i.e. one record's transactions are a subset of the other's; the
  *    evidence is gathered in importSnapshot, since transaction ids are
  *    globally unique in the store and the subset relation itself can
- *    therefore never be recomputed from stored postings).
+ *    therefore never be recomputed from stored postings). Evidence is
+ *    the stronger signal and applies regardless of owner.
  * Returns, per account id, the ids it is suspected of duplicating.
  * Ignored accounts take no part: an account the user already marked as
  * a duplicate is a settled decision.
  */
 export function suspectedDuplicatesFor(
-  accounts: readonly { id: number; name: string; mask: string; ignored: number }[],
+  accounts: readonly {
+    id: number;
+    name: string;
+    mask: string;
+    fifthDigit: string;
+    owner: string | null;
+    ignored: number;
+  }[],
   evidencePairs: readonly (readonly [number, number])[],
 ): Map<number, number[]> {
   const active = accounts.filter((a) => a.ignored === 0);
@@ -422,16 +437,17 @@ export function suspectedDuplicatesFor(
     if (!arr.includes(other)) arr.push(other);
     result.set(id, arr);
   };
-  const sameProductMask = (
+  const sameProductEnding = (
     a: (typeof active)[number],
     b: (typeof active)[number],
   ) =>
     a.mask !== "" &&
-    a.mask === b.mask &&
-    a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+    (a.owner || null) === (b.owner || null) &&
+    a.name.trim().toLowerCase() === b.name.trim().toLowerCase() &&
+    effectiveEnding(a.mask, a.fifthDigit) === effectiveEnding(b.mask, b.fifthDigit);
   for (const a of active) {
     for (const b of active) {
-      if (b.id !== a.id && sameProductMask(a, b)) add(a.id, b.id);
+      if (b.id !== a.id && sameProductEnding(a, b)) add(a.id, b.id);
     }
   }
   for (const [x, y] of evidencePairs) {
@@ -728,6 +744,8 @@ const creditView = z.object({
   /** User-chosen display prefix for the account ("" when unset). */
   accountNickname: z.string(),
   mask: z.string(),
+  /** Fifth-from-last card digit the user recorded ("" when unset); with the mask it forms the effective ending. */
+  fifthDigit: z.string(),
   owner: z.string().nullable(),
   name: z.string(),
   amount: z.number(),
@@ -791,6 +809,7 @@ const dashboardResponse = z.object({
       name: z.string(),
       accountName: z.string(),
       mask: z.string(),
+      fifthDigit: z.string(),
       owner: z.string().nullable(),
     }),
   ),
@@ -812,6 +831,8 @@ const dashboardResponse = z.object({
       /** User-chosen display prefix ("" when unset); never set by Plaid. */
       nickname: z.string(),
       mask: z.string(),
+      /** Fifth-from-last card digit the user recorded ("" when unset); never set by Plaid. */
+      fifthDigit: z.string(),
       issuer: z.string(),
       /** ISO currency code from Plaid; null when unknown (treated as USD). */
       currency: z.string().nullable(),
@@ -823,12 +844,31 @@ const dashboardResponse = z.object({
       creditCount: z.number(),
       /**
        * Read-time suspicion that this record duplicates another one
-       * (same product + mask, or a transaction subset). A prompt for
-       * the user to decide — the account stays active and counted.
+       * (same product + effective ending within one owner, or
+       * transaction evidence). A prompt for the user to decide — the
+       * account stays active and counted.
        */
       suspectedDuplicate: z.boolean(),
       /** Ids of the accounts this one is suspected of duplicating. */
       duplicateSuspectIds: z.array(z.number()),
+      /**
+       * Identifying stored transactions for telling same-ending cards
+       * apart, present only when another account of the same owner
+       * shares this account's product + effective ending (the records
+       * a user cannot distinguish at a glance): the latest stored
+       * annual/membership-fee posting when one exists, plus the most
+       * recent stored postings. Null for every other account.
+       */
+      disambiguation: z
+        .object({
+          annualFeePosting: z
+            .object({ date: z.string(), name: z.string(), amount: z.number() })
+            .nullable(),
+          recentPostings: z.array(
+            z.object({ date: z.string(), name: z.string(), amount: z.number() }),
+          ),
+        })
+        .nullable(),
     }),
   ),
   credits: z.array(creditView),
@@ -846,6 +886,7 @@ const dashboardResponse = z.object({
       accountId: z.number(),
       accountName: z.string(),
       mask: z.string(),
+      fifthDigit: z.string(),
       owner: z.string().nullable(),
       /** ISO currency of the posting's account (USD when unknown). */
       currency: z.string(),
@@ -1191,6 +1232,7 @@ async function computeDashboard(
             accountName: acct.name,
             accountNickname: acct.nickname,
             mask: acct.mask,
+            fifthDigit: acct.fifthDigit,
             owner: ownerLabelFor(acct.owner, ownerLabels),
             name: c.name,
             amount: c.amount,
@@ -1251,6 +1293,7 @@ async function computeDashboard(
             accountId: p.accountId,
             accountName: acct.name,
             mask: acct.mask,
+            fifthDigit: acct.fifthDigit,
             owner: ownerLabelFor(acct.owner, ownerLabels),
             currency: acct.currency ?? "USD",
           };
@@ -1278,6 +1321,7 @@ async function computeDashboard(
             name: c.name,
             accountName: acct.name,
             mask: acct.mask,
+            fifthDigit: acct.fifthDigit,
             owner: ownerLabelFor(acct.owner, ownerLabels),
           };
         })
@@ -1298,6 +1342,67 @@ async function computeDashboard(
         ),
       );
 
+      // Disambiguation evidence for same-ending cards: the accounts a
+      // user cannot tell apart at a glance are one owner's records
+      // sharing a product + effective ending — exactly the heuristic's
+      // grouping above. For each such account, surface what its stored
+      // postings say (the latest annual/membership-fee posting when one
+      // is stored, plus its most recent postings) so the Cards section
+      // can show the user which physical card each record is before
+      // they record its fifth digit.
+      const sameEndingGroups = new Map<string, number[]>();
+      for (const a of accountRows) {
+        if (a.ignored !== 0 || a.mask === "") continue;
+        const key = [
+          a.owner ?? "",
+          a.name.trim().toLowerCase(),
+          effectiveEnding(a.mask, a.fifthDigit),
+        ].join("|");
+        const arr = sameEndingGroups.get(key) ?? [];
+        arr.push(a.id);
+        sameEndingGroups.set(key, arr);
+      }
+      const postingsByAccount = new Map<number, typeof postingRows>();
+      for (const p of postingRows) {
+        const arr = postingsByAccount.get(p.accountId) ?? [];
+        arr.push(p);
+        postingsByAccount.set(p.accountId, arr);
+      }
+      type Disambiguation = {
+        annualFeePosting: { date: string; name: string; amount: number } | null;
+        recentPostings: { date: string; name: string; amount: number }[];
+      };
+      const disambiguationByAccount = new Map<number, Disambiguation>();
+      for (const ids of sameEndingGroups.values()) {
+        if (ids.length < 2) continue;
+        for (const id of ids) {
+          const mine = [...(postingsByAccount.get(id) ?? [])].sort((x, y) => {
+            const dx = transactionDateOf(x);
+            const dy = transactionDateOf(y);
+            if (dx !== dy) return dx < dy ? 1 : -1;
+            if (x.date !== y.date) return x.date < y.date ? 1 : -1;
+            return y.id - x.id;
+          });
+          const fee = mine.find((p) => {
+            const n = p.name.toLowerCase();
+            return n.includes("membership fee") || n.includes("annual fee");
+          });
+          disambiguationByAccount.set(id, {
+            annualFeePosting: fee
+              ? { date: transactionDateOf(fee), name: fee.name, amount: fee.amount }
+              : null,
+            recentPostings: mine
+              .filter((p) => !fee || p.id !== fee.id)
+              .slice(0, 3)
+              .map((p) => ({
+                date: transactionDateOf(p),
+                name: p.name,
+                amount: p.amount,
+              })),
+          });
+        }
+      }
+
       return {
         lastImportAt,
         ownerLabels,
@@ -1312,6 +1417,7 @@ async function computeDashboard(
           name: a.name,
           nickname: a.nickname,
           mask: a.mask,
+          fifthDigit: a.fifthDigit,
           issuer: a.issuer,
           currency: a.currency,
           owner: ownerLabelFor(a.owner, ownerLabels),
@@ -1321,6 +1427,7 @@ async function computeDashboard(
           creditCount: creditCountByAccount.get(a.id) ?? 0,
           suspectedDuplicate: suspected.has(a.id),
           duplicateSuspectIds: suspected.get(a.id) ?? [],
+          disambiguation: disambiguationByAccount.get(a.id) ?? null,
         })),
         credits,
         unassignedCount: unassignedAll.length,
@@ -1544,6 +1651,7 @@ export const Actions = {
           issuer,
           owner,
           nickname: "",
+          fifthDigit: "",
           currency: a.currency ?? null,
           ignored,
           createdAt: new Date(),
@@ -2281,14 +2389,20 @@ export const Actions = {
   }),
 
   // Per-account user settings that Plaid must never overwrite: the
-  // display nickname (prefix) and — as an explicit user correction, in
-  // contrast to imports, which only ever fill an unset owner — the
-  // owner person key.
+  // display nickname (prefix), the fifth digit that tells same-ending
+  // cards apart, and — as an explicit user correction, in contrast to
+  // imports, which only ever fill an unset owner — the owner person key.
   updateAccount: defineAction({
     request: z.object({
       accountId: z.number(),
       /** Display prefix for the account; "" clears it. */
       nickname: z.string().trim().max(24).optional(),
+      /**
+       * Fifth-from-last card digit (a single character 0-9) distinguishing
+       * this card from a same-ending one; "" clears it. Validated in the
+       * handler, not only here — see below.
+       */
+      fifthDigit: z.string().optional(),
       /** Owner person key ("A" / "B"); null un-attributes the account. */
       owner: z.string().trim().min(1).max(8).nullable().optional(),
     }),
@@ -2302,6 +2416,19 @@ export const Actions = {
       if (!rows[0]) throw new Error(`updateAccount: account ${args.accountId} not found`);
       const patch: Partial<typeof schema.accounts.$inferInsert> = {};
       if (args.nickname !== undefined) patch.nickname = args.nickname;
+      if (args.fifthDigit !== undefined) {
+        // Handler-enforced, like the import date rule: the request
+        // schema is not the only way in, and a malformed value must
+        // never reach storage, where effective-ending comparisons
+        // would read it as a real distinguishing digit.
+        const d = args.fifthDigit.trim();
+        if (!/^[0-9]?$/.test(d)) {
+          throw new Error(
+            "updateAccount: fifthDigit must be a single digit 0-9, or empty to clear",
+          );
+        }
+        patch.fifthDigit = d;
+      }
       if (args.owner !== undefined) patch.owner = args.owner;
       if (Object.keys(patch).length > 0) {
         await db

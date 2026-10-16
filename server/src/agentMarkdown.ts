@@ -50,16 +50,60 @@ function statusOf(c: Credit): string {
 }
 
 /**
- * "Alex · Hilton Honors Aspire Card ··1111" (owner / mask omitted when
- * absent). When the user has set an account nickname (the short prefix
+ * A card's effective ending: the user-recorded fifth digit followed by
+ * the mask when both are present ("41003"), otherwise the plain mask
+ * ("1003"). The mask alone cannot tell one person's same-product cards
+ * apart — a household can hold three Aspires all ending 1003 — while
+ * the issuers' apps show the five-digit ending that does. This is THE
+ * definition every surface agrees on: the duplicate heuristic in
+ * actions.ts compares effective endings, and the labels below (and the
+ * dashboard's) render them.
+ */
+export function effectiveEnding(
+  mask: string | null | undefined,
+  fifthDigit: string | null | undefined,
+): string {
+  const m = mask ?? "";
+  const d = fifthDigit ?? "";
+  return d !== "" && m !== "" ? `${d}${m}` : m;
+}
+
+/**
+ * The canonical compact card identifier: owner label + effective
+ * ending, plainly — "Kun 41003" (fifth digit recorded) or "Na 1003".
+ * Falls back to whichever half exists; "" when neither does.
+ */
+export function cardTag(
+  owner: string | null | undefined,
+  mask: string | null | undefined,
+  fifthDigit: string | null | undefined,
+): string {
+  const ending = effectiveEnding(mask, fifthDigit);
+  if (owner && ending) return `${owner} ${ending}`;
+  return ending || owner || "";
+}
+
+type Account = DashboardData["accounts"][number];
+
+/**
+ * "Sam 2222 · Hilton Honors Aspire Card" — the canonical tag (owner +
+ * effective ending) followed by the product name.
+ */
+function accountLabel(a: Account): string {
+  const tag = cardTag(a.owner, a.mask, a.fifthDigit);
+  return tag ? `${tag} · ${a.name}` : a.name;
+}
+
+/**
+ * The same composition for a credit: "Sam 2222 · Hilton Honors Aspire
+ * Card". When the user has set an account nickname (the short prefix
  * the dashboard rows carry, e.g. "UA"), it stands in for the product
- * name: "Na · UA ··6151".
+ * name: "Na 6151 · UA".
  */
 function cardLabel(c: Credit): string {
-  const parts: string[] = [];
-  if (c.owner) parts.push(c.owner);
-  parts.push(c.accountNickname !== "" ? c.accountNickname : c.accountName);
-  return c.mask ? `${parts.join(" · ")} ··${c.mask}` : parts.join(" · ");
+  const product = c.accountNickname !== "" ? c.accountNickname : c.accountName;
+  const tag = cardTag(c.owner, c.mask, c.fifthDigit);
+  return tag ? `${tag} · ${product}` : product;
 }
 
 function creditBlock(c: Credit): string {
@@ -123,16 +167,31 @@ export function warningLines(data: DashboardData): string[] {
   const accountById = new Map(data.accounts.map((a) => [a.id, a]));
   for (const a of data.accounts) {
     if (!a.suspectedDuplicate) continue;
-    const others = a.duplicateSuspectIds
+    const suspects = a.duplicateSuspectIds
       .map((id) => accountById.get(id))
-      .filter((o): o is NonNullable<typeof o> => o != null)
-      .map((o) => `${o.name}${o.mask ? ` ··${o.mask}` : ""}`)
-      .join("; ");
+      .filter((o): o is Account => o != null);
+    const others = suspects.map((o) => accountLabel(o)).join("; ");
+    // The same-ending heuristic (same product + same effective ending,
+    // same owner) has a user-side resolution the transaction-evidence
+    // signal does not: record each card's fifth digit, and cards whose
+    // five-digit endings differ stop being flagged.
+    const sameEnding = suspects.some(
+      (o) =>
+        o.name.trim().toLowerCase() === a.name.trim().toLowerCase() &&
+        (o.owner ?? null) === (a.owner ?? null) &&
+        effectiveEnding(o.mask, o.fifthDigit) === effectiveEnding(a.mask, a.fifthDigit),
+    );
     lines.push(
-      `- Possible duplicate account: ${a.name}${a.mask ? ` ··${a.mask}` : ""} may be the same ` +
+      `- Possible duplicate account: ${accountLabel(a)} may be the same ` +
         `underlying card as ${others}. It is still counted in every total. If it is a ` +
         "supplementary/duplicate record, mark it ignored in the Cards section; if it is a " +
-        "genuinely separate card, no action is needed.",
+        "genuinely separate card, no action is needed." +
+        (sameEnding
+          ? " If the two are separate cards that share an ending, record each card's fifth " +
+            "digit in the Cards section — the digit before the last four, shown as part of " +
+            "the five-digit ending in your issuer's app: cards whose five-digit endings " +
+            "differ are no longer flagged."
+          : ""),
     );
   }
   for (const c of data.credits) {
@@ -146,7 +205,7 @@ export function warningLines(data: DashboardData): string[] {
   for (const a of data.accounts) {
     if (!a.ignored && a.owner == null) {
       lines.push(
-        `- Login not identified yet: ${a.name}${a.mask ? ` ··${a.mask}` : ""} has no owner ` +
+        `- Login not identified yet: ${accountLabel(a)} has no owner ` +
           "attribution. Set its owner in the Cards section so its credits group under the right person.",
       );
     }
@@ -158,10 +217,7 @@ export function warningLines(data: DashboardData): string[] {
 function accountLines(data: DashboardData): string[] {
   if (data.accounts.length === 0) return ["- No accounts imported yet."];
   return data.accounts.map((a) => {
-    const parts: string[] = [];
-    if (a.owner) parts.push(a.owner);
-    parts.push(a.name);
-    let line = `- ${parts.join(" · ")}${a.mask ? ` ··${a.mask}` : ""}`;
+    let line = `- ${accountLabel(a)}`;
     if (a.nickname !== "") line += ` — shown as "${a.nickname}"`;
     if (a.ignored) line += " — ignored (you marked it a duplicate / not tracked)";
     else if (a.creditCount === 0) line += " — no supported credits tracked";
@@ -246,10 +302,8 @@ export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): str
     out.push("");
     if (data.hiddenCredits.length > 0) {
       for (const h of data.hiddenCredits) {
-        const parts: string[] = [];
-        if (h.owner) parts.push(h.owner);
-        parts.push(h.accountName);
-        const card = h.mask ? `${parts.join(" · ")} ··${h.mask}` : parts.join(" · ");
+        const tag = cardTag(h.owner, h.mask, h.fifthDigit);
+        const card = tag ? `${tag} · ${h.accountName}` : h.accountName;
         out.push(`- ${h.name} — ${card}`);
       }
     } else {
