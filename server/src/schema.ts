@@ -25,7 +25,7 @@ export const accounts = sqliteTable("accounts", {
   mask: text("mask").notNull().default(""),
   balance: real("balance"),
   creditLimit: real("credit_limit"),
-  /** Card network issuer of this account: "Amex" or "Chase". */
+  /** Card network issuer of this account: "Amex", "Chase" or "U.S. Bank". */
   issuer: text("issuer").notNull().default("Amex"),
   /**
    * User-chosen display prefix for this account (e.g. "UA"), shown before

@@ -112,6 +112,7 @@ function productPrefix(accountName: string): string {
   if (n.includes("world of hyatt") && n.includes("business")) return "HyattBiz";
   if (n.includes("ihg")) return "IHG";
   if (n.includes("ritz")) return "Ritz";
+  if (n.includes("altitude")) return "Altitude";
   if (n.includes("platinum")) return "Plat";
   if (n.includes("gold")) return "Gold";
   return accountName.replace(/®/g, "").replace(" Card", "").trim().split(/\s+/)[0] ?? "";

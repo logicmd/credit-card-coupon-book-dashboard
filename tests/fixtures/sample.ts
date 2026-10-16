@@ -111,6 +111,19 @@ export const ALEX_RITZ = {
   owner: "A",
 } as const;
 
+// Alex's U.S. Bank card. The name here carries the product (some reads
+// do); real U.S. Bank accounts usually arrive with a generic Plaid name
+// ("Credit Card - 7536") instead, which deliberately matches NO catalog
+// — see tests/usbank.test.ts for both halves of that story.
+export const ALEX_ALTITUDE_RESERVE = {
+  plaidAccountId: "fake-alex-altitude-4321",
+  name: "U.S. Bank Altitude® Reserve Visa Infinite® Card",
+  mask: "4321",
+  balance: 0,
+  creditLimit: 10000,
+  owner: "A",
+} as const;
+
 /** A complete January snapshot for Alex's two cards. */
 export const JANUARY_SNAPSHOT = {
   windowStart: "2026-01-01",

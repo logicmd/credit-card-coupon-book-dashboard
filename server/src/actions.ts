@@ -115,6 +115,25 @@ const RITZ_CARLTON: CreditDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// U.S. Bank catalog: published benefit terms per U.S. Bank card product.
+// U.S. Bank is the awkward issuer for identification: Plaid returns a
+// generic account name ("Credit Card - 7536") for its cards, so
+// catalogFor can only fire when the account name actually carries the
+// product name. For generically named accounts the product is
+// identified by evidence instead — the $400 annual fee and the "Annual
+// Travel/dining Credit" postings — and the credit row is created from
+// this definition during setup (see SETUP_FOR_MUSE.md).
+// ---------------------------------------------------------------------------
+
+const ALTITUDE_RESERVE: CreditDef[] = [
+  // The bank reimburses each qualifying travel/dining charge with its
+  // own small posting until the $325 cardmember-year allowance is used
+  // up. "Real-time Rewards Credit" postings are points redemptions, NOT
+  // this credit — the pattern below never matches them.
+  { name: "Travel/Dining Credit", amount: 325, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "travel/dining credit", note: "U.S. Bank reimburses travel and dining purchases: each qualifying charge gets its own small 'Annual Travel/dining Credit' posting, until $325 is used for the cardmember year. The cycle is the cardmember anniversary year — the May 1 anchor is a placeholder default; set it to the date your $400 annual fee posts" },
+];
+
+// ---------------------------------------------------------------------------
 // Non-seeded catalog credits: the benefit families the dashboard hides by
 // default (ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
 // entertainment, Walmart+). These are real published benefits of the
@@ -239,6 +258,7 @@ const ALL_CATALOG_CREDIT_NAMES: string[] = [
   HYATT_BUSINESS,
   IHG_PREMIER,
   RITZ_CARLTON,
+  ALTITUDE_RESERVE,
 ].flatMap((defs) => defs.map((d) => d.name));
 
 export function isExcludedName(
@@ -327,6 +347,11 @@ export function catalogFor(accountName: string): CreditDef[] | null {  const n =
   if (n.includes("world of hyatt") && n.includes("business")) return HYATT_BUSINESS;
   if (n.includes("ihg") && n.includes("premier")) return IHG_PREMIER;
   if (n.includes("ritz-carlton")) return RITZ_CARLTON;
+  // U.S. Bank: fires only when the name carries the product — U.S. Bank
+  // usually reports a generic name instead (see the catalog section).
+  // Matched on "altitude" alone: the product name carries a ® in the
+  // middle ("Altitude® Reserve"), so the two-word phrase never matches.
+  if (n.includes("altitude")) return ALTITUDE_RESERVE;
   if (n.includes("business platinum")) return BIZ_PLAT;
   if (n.includes("aspire")) return ASPIRE;
   if (n.includes("brilliant")) return BRILLIANT;
@@ -378,9 +403,12 @@ export function matchCreditForPosting<T extends { matchPattern: string }>(
   );
 }
 
-/** Issuer ("Amex" / "Chase") for a card, inferred from its product name. */
+/** Issuer ("Amex" / "Chase" / "U.S. Bank") for a card, inferred from its product name. */
 export function issuerForAccountName(accountName: string): string {
   const n = accountName.toLowerCase();
+  if (n.includes("u.s. bank") || n.includes("altitude")) {
+    return "U.S. Bank";
+  }
   if (
     n.includes("chase") ||
     n.includes("sapphire") ||
@@ -1510,7 +1538,7 @@ export const Actions = {
            * is corrected through updateAccount, not by a later import).
            */
           owner: z.string().optional(),
-          /** Issuer ("Amex" / "Chase"); inferred from the card name when omitted. */
+          /** Issuer ("Amex" / "Chase" / "U.S. Bank"); inferred from the card name when omitted. */
           issuer: z.string().optional(),
           /** ISO currency code from Plaid (balances.iso_currency_code). */
           currency: z.string().optional(),
