@@ -1,4 +1,4 @@
-// Actions for the Amex Credits Dashboard.
+// Actions for the Credit Card Coupon Book Dashboard.
 //
 // Data model: Plaid (via the connector CLI, read by an agent task or by the
 // initial seed import) supplies card accounts and the actual statement-credit
@@ -1507,7 +1507,11 @@ export const Actions = {
               // a refresh that re-derives them differently must not
               // silently swap two people's cards.
               ...(known.owner == null && owner ? { owner } : {}),
-              ...(a.ignored !== undefined ? { ignored: a.ignored ? 1 : 0 } : {}),
+              // An import may record a curated ignore decision, but it
+              // must NEVER un-ignore: a stored ignored=1 is the user's
+              // (or a legacy import's) settled state, and only an
+              // explicit setAccountIgnored from the user reverses it.
+              ...(a.ignored === true ? { ignored: 1 } : {}),
             })
             .where(eq(schema.accounts.id, known.id));
           continue;

@@ -290,8 +290,10 @@ describe("importSnapshot — duplicate account records are the user's decision",
     const first = await importOne(db, aspire("fake-keep-1"));
     const second = await importOne(db, aspire("fake-keep-2"));
     await Actions.setAccountIgnored.handler(ctx, { accountId: second.id, ignored: true });
-    // A later import of the same record must not resurrect it.
-    await importOne(db, aspire("fake-keep-2"));
+    // A later import of the same record must not resurrect it — not
+    // even when the payload explicitly carries ignored: false (imports
+    // may record an ignore, never lift one).
+    await importOne(db, aspire("fake-keep-2", { ignored: false }));
     const rows = await db.select().from(schema.accounts);
     expect(rows.find((r) => r.id === second.id)!.ignored).toBe(1);
     // And with the pair resolved, the survivor is no longer suspected.
