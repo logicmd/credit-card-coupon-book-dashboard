@@ -60,6 +60,20 @@ export const SAM_STORE_CARD = {
   owner: "B",
 } as const;
 
+// Sam's co-branded personal Platinum (fictional id/mask, like everything
+// in this file). It carries the clawback cases in import.test.ts, whose
+// posting names, amounts, and date sequences are the owner's real
+// Morgan Stanley Platinum records (used at the owner's direction) — the
+// account identity here stays fictional.
+export const SAM_MS_PLATINUM = {
+  plaidAccountId: "fake-sam-msplat-5555",
+  name: "Morgan Stanley Platinum Card",
+  mask: "5555",
+  balance: 0,
+  creditLimit: 10000,
+  owner: "B",
+} as const;
+
 // Alex's Chase cards (fictional ids/masks, like everything in this file).
 export const ALEX_SAPPHIRE = {
   plaidAccountId: "fake-alex-sapphire-6666",

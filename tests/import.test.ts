@@ -3,7 +3,7 @@ import { asc } from "drizzle-orm";
 import { addDays, Actions, periodBounds } from "../server/src/actions";
 import * as schema from "../server/src/schema";
 import { createTestDb, fakeCtx, todayLA } from "./helpers";
-import { ALEX_ASPIRE, ALEX_BIZ_PLAT, JANUARY_SNAPSHOT } from "./fixtures/sample";
+import { ALEX_ASPIRE, ALEX_BIZ_PLAT, JANUARY_SNAPSHOT, SAM_MS_PLATINUM } from "./fixtures/sample";
 
 async function importJanuary(db: ReturnType<typeof createTestDb>) {
   return Actions.importSnapshot.handler(fakeCtx(db), structuredClone(JANUARY_SNAPSHOT) as any);
@@ -344,55 +344,91 @@ describe("importSnapshot — owner attribution is sticky", () => {
 });
 
 describe("importSnapshot — signed amounts (clawbacks) and strict dates", () => {
-  test("a negative posting imports and nets against the credit it reverses", async () => {
-    const db = createTestDb();
-    const ctx = fakeCtx(db);
-    const today = todayLA();
-    const quarter = periodBounds("quarterly", today);
-    // Credit and its clawback land in the CURRENT quarter, so the
-    // dashboard's current-period math must net them to zero.
-    await Actions.importSnapshot.handler(ctx, {
-      complete: true,
-      windowStart: quarter.start,
-      windowEnd: today,
-      accounts: [ALEX_ASPIRE],
-      postings: [
-        { txnId: "fake-claw-credit", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: quarter.start, name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-claw-reversal", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: addDays(quarter.start, 5), name: "AMEX Flight Credit", amount: -50 },
-      ],
-    } as any);
-    const stored = await db.select().from(schema.postings);
-    expect(stored.map((p) => p.amount).sort()).toEqual([-50, 50]);
-    // The reversal matched the same credit by name, like any posting.
-    expect(stored.every((p) => p.creditId != null)).toBe(true);
-    expect(stored[0]!.creditId).toBe(stored[1]!.creditId);
-
-    const dash: any = await Actions.getDashboard.handler(ctx, {});
-    const flight = dash.credits.find((c: any) => c.name === "Flight Credit");
-    expect(flight.currentPostings).toHaveLength(2);
-    expect(flight.currentUsed).toBe(0);
-    expect(flight.currentRemaining).toBe(50);
-  });
-
-  test("a partial clawback restores exactly the clawed-back part of the remaining", async () => {
+  // The two clawback cases below are the owner's REAL posting records
+  // (Morgan Stanley Platinum), used at the owner's direction as the
+  // clawback fixtures: real posting names, amounts, and date sequences
+  // on a fictional account identity (SAM_MS_PLATINUM). Plaid's sign
+  // convention is negative = credit received, positive = debit; the
+  // amounts passed to importSnapshot are the Plaid-negated values the
+  // refresh produces (positive = credit received, negative = clawback).
+  test("Case A: credit → clawback → same-day re-credit nets to exactly the original $300", async () => {
+    // Real records, Oct 2026:
+    //   posted 2026-10-11 (auth 2026-10-10)  "Platinum Hotel Credit"  −300.00 Plaid (credit received)
+    //   posted 2026-10-12 (auth 2026-10-11)  "Platinum Hotel Credit"  +213.98 Plaid (CLAWBACK)
+    //   posted 2026-10-12 (auth 2026-10-11)  "Platinum Hotel Credit"  −213.98 Plaid (re-issued)
+    // Net usage for the semiannual period is $300.00. The pre-fix
+    // ledger filtered the clawback debit out and counted 300 + 213.98
+    // = $513.98 of usage — the bug the signed-posting model fixes.
+    // The sequence is transposed into the current semiannual period
+    // (repo convention for dashboard-level tests), preserving the
+    // names, amounts, signs, day offsets, and auth = posted − 1 day.
     const db = createTestDb();
     const ctx = fakeCtx(db);
     const today = todayLA();
     const half = periodBounds("semiannual", today);
+    const postedCredit = addDays(half.start, 10);
+    const postedPair = addDays(half.start, 11);
     await Actions.importSnapshot.handler(ctx, {
       complete: true,
       windowStart: half.start,
       windowEnd: today,
-      accounts: [ALEX_BIZ_PLAT],
+      accounts: [SAM_MS_PLATINUM],
       postings: [
-        { txnId: "fake-claw-hotel", accountPlaidId: ALEX_BIZ_PLAT.plaidAccountId, date: half.start, name: "Platinum Hotel Credit", amount: 300 },
-        { txnId: "fake-claw-hotel-back", accountPlaidId: ALEX_BIZ_PLAT.plaidAccountId, date: addDays(half.start, 9), name: "Platinum Hotel Credit", amount: -120 },
+        { txnId: "fake-clawA-credit", accountPlaidId: SAM_MS_PLATINUM.plaidAccountId, date: postedCredit, transactionDate: addDays(postedCredit, -1), name: "Platinum Hotel Credit", amount: 300 },
+        { txnId: "fake-clawA-clawback", accountPlaidId: SAM_MS_PLATINUM.plaidAccountId, date: postedPair, transactionDate: addDays(postedPair, -1), name: "Platinum Hotel Credit", amount: -213.98 },
+        { txnId: "fake-clawA-recredit", accountPlaidId: SAM_MS_PLATINUM.plaidAccountId, date: postedPair, transactionDate: addDays(postedPair, -1), name: "Platinum Hotel Credit", amount: 213.98 },
       ],
     } as any);
+    const stored = await db.select().from(schema.postings);
+    expect(stored.map((p) => p.amount).sort()).toEqual([-213.98, 213.98, 300]);
+    // All three matched the same seeded Hotel Credit row by name.
+    expect(stored.every((p) => p.creditId != null)).toBe(true);
+    expect(new Set(stored.map((p) => p.creditId)).size).toBe(1);
+
     const dash: any = await Actions.getDashboard.handler(ctx, {});
     const hotel = dash.credits.find((c: any) => c.name === "Hotel Credit (FHR / Hotel Collection)");
-    expect(hotel.currentUsed).toBe(180);
-    expect(hotel.currentRemaining).toBe(120);
+    expect(hotel.currentPostings).toHaveLength(3);
+    // Exactly $300.00 of net usage — not the $513.98 the old
+    // positive-only filter produced.
+    expect(Math.round(hotel.currentUsed * 100)).toBe(30000);
+    expect(hotel.currentRemaining).toBe(0);
+  });
+
+  test("Case B: a partial clawback at an adjusted amount nets to $1.11 of usage", async () => {
+    // Real records, Jan 2025 — the old $200 semiannual FHR era:
+    //   posted 2025-01-15 (auth 2025-01-12)  "Platinum Hotel Credit"  −200.00 Plaid (credit received)
+    //   posted 2025-01-27 (auth 2025-01-26)  "Platinum Hotel Credit"  +198.89 Plaid (clawback, adjusted — not the full $200)
+    // Jan 2025 is never the dashboard's current period, so this case is
+    // pinned at the ledger level: both postings stored signed and
+    // matched to the same credit, and their signed sum over the
+    // H1 2025 semiannual window (by transaction date) is $1.11.
+    const db = createTestDb();
+    const ctx = fakeCtx(db);
+    await Actions.importSnapshot.handler(ctx, {
+      complete: false,
+      windowStart: "2025-01-01",
+      windowEnd: "2025-01-31",
+      accounts: [SAM_MS_PLATINUM],
+      postings: [
+        { txnId: "fake-clawB-credit", accountPlaidId: SAM_MS_PLATINUM.plaidAccountId, date: "2025-01-15", transactionDate: "2025-01-12", name: "Platinum Hotel Credit", amount: 200 },
+        { txnId: "fake-clawB-clawback", accountPlaidId: SAM_MS_PLATINUM.plaidAccountId, date: "2025-01-27", transactionDate: "2025-01-26", name: "Platinum Hotel Credit", amount: -198.89 },
+      ],
+    } as any);
+    const stored = await db.select().from(schema.postings);
+    expect(stored.map((p) => p.amount).sort()).toEqual([-198.89, 200]);
+    expect(stored.every((p) => p.creditId != null)).toBe(true);
+    expect(stored[0]!.creditId).toBe(stored[1]!.creditId);
+
+    const win = periodBounds("semiannual", "2025-01-15");
+    expect(win.start).toBe("2025-01-01");
+    expect(win.end).toBe("2025-06-30");
+    const net = stored
+      .filter((p) => {
+        const eff = p.transactionDate ?? p.date;
+        return eff >= win.start && eff <= win.end;
+      })
+      .reduce((s, p) => s + p.amount, 0);
+    expect(Math.round(net * 100)).toBe(111);
   });
 
   test("impossible calendar dates are rejected, not rolled over", async () => {
