@@ -250,8 +250,8 @@ export function App() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <SafeAreaTopScrim backgroundColor="var(--bg)" />
       <main className="mx-auto w-full max-w-3xl px-4 pb-10">
-        <header className="flex items-end justify-between gap-3 pt-5 pb-4">
-          <div>
+        <header className="flex flex-col items-start gap-3 pt-5 pb-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
             <h1 className="text-xl font-semibold leading-tight">Available now</h1>
             <p className="mt-1 text-sm text-[var(--dim)]">
               {dash.data
@@ -263,7 +263,7 @@ export function App() {
                 : "Loading your credits…"}
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="flex flex-wrap gap-2 sm:shrink-0">
             <button
               type="button"
               aria-label="Refer this dashboard to a friend"
