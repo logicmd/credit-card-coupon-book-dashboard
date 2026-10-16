@@ -4,9 +4,9 @@ Track every Amex and Chase statement credit across all your cards — and actual
 
 If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant, Chase Sapphire Preferred…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual — and some run on your cardmember anniversary year instead of the calendar year. They are easy to forget and issuers do not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
 
-## Supported cards
+## Supported cards (verified)
 
-The built-in catalog covers exactly these cards — their credit amounts, cycles, posting-name patterns, and anniversary anchors are encoded in the catalog and verified against them:
+"Verified" means two things, and both are required: the card has catalog definitions in this repo (`server/src/actions.ts`), **and** unit tests pin those definitions down — the catalog tests assert each card's credit amounts, cycles, posting-name patterns, and anniversary anchors, and the DB-backed suites exercise the Chase products end to end. Exactly these nine cards qualify:
 
 - Amex Platinum
 - Amex Business Platinum
@@ -19,6 +19,17 @@ The built-in catalog covers exactly these cards — their credit amounts, cycles
 - The Ritz-Carlton Card
 
 Any other card is **not yet supported**. In particular, Chase United cards (e.g. United Explorer) have **not** been verified and count as unsupported: an unsupported account can still show up via Plaid, but its credits are not tracked until a catalog entry exists for it.
+
+## Contributing
+
+New cards are added by **pull request** — that is the only path to "supported":
+
+1. Fork the repo and add the card's catalog definitions (amounts, cycles, posting-name patterns, anniversary anchor) in `server/src/actions.ts`.
+2. Add unit tests for the new card: at minimum a catalog test asserting its definitions, following the existing per-card tests in `tests/catalog.test.ts`. **No tests, no "verified"** — a card joins the list above only once its tests land.
+3. Run `bun test` and `bun run typecheck` — both must be green.
+4. Open the PR describing the card's published benefit terms and where each amount/pattern comes from.
+
+The intended workflow is to let your own Muse (or another AI assistant) prepare the PR for you: point it at this repo, have it follow [SETUP_FOR_MUSE.md](SETUP_FOR_MUSE.md), and ask it to add the card with its tests and open the pull request.
 
 ## Features
 

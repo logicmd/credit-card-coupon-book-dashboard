@@ -12,7 +12,7 @@ If the user already has an artifact with that slug, stop and ask before replacin
 
 The app's data comes from the Plaid connector. Check whether the user has Plaid connected; if not, walk them through connecting it and linking their American Express login(s). Households commonly have **two** Amex logins (e.g. the user and their spouse) — link both if they exist. If the user also holds Chase cards with coupon-book credits (Sapphire Preferred, World of Hyatt Business, IHG One Rewards Premier, Ritz-Carlton), link the Chase login too — the catalog covers those products, including their anniversary-year cycles.
 
-Supported cards are exactly the nine listed under "Supported cards" in the README. Any other card is not yet supported — in particular, Chase United cards (e.g. United Explorer) have not been verified: their accounts may appear via Plaid, but no credits are tracked for them.
+Supported cards are exactly the nine listed under "Supported cards (verified)" in the README — "verified" means the card has catalog definitions in this repo **and** unit tests pinning them down. Any other card is not yet supported — in particular, Chase United cards (e.g. United Explorer) have not been verified: their accounts may appear via Plaid, but no credits are tracked for them. If the user wants another card supported, that is a contribution: add its catalog definitions **and** unit tests, run `bun test` and `bun run typecheck`, and open a pull request (see "Contributing" in the README) — do not improvise a catalog entry without tests.
 
 Do not ask for, accept, or store Amex usernames/passwords yourself. The connection happens through the connector's own flow.
 
