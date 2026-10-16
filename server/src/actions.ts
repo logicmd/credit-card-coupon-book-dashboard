@@ -847,6 +847,8 @@ const dashboardResponse = z.object({
       accountName: z.string(),
       mask: z.string(),
       owner: z.string().nullable(),
+      /** ISO currency of the posting's account (USD when unknown). */
+      currency: z.string(),
     }),
   ),
   totals: z.object({
@@ -1250,6 +1252,7 @@ async function computeDashboard(
             accountName: acct.name,
             mask: acct.mask,
             owner: ownerLabelFor(acct.owner, ownerLabels),
+            currency: acct.currency ?? "USD",
           };
         });
 

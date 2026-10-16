@@ -9,8 +9,14 @@ type Dashboard = ApiResponse<typeof api, "getDashboard">;
 type Credit = Dashboard["credits"][number];
 type Period = Credit["period"];
 
-const money = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+/** Format an amount in the account's currency (USD when unknown). */
+const money = (n: number, currency: string = "USD") => {
+  try {
+    return n.toLocaleString("en-US", { style: "currency", currency });
+  } catch {
+    return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+};
 
 /** "2027-01-01" → "Jan 1, 2027" (interpreted as a plain calendar date). */
 const fmtDay = (iso: string) =>
@@ -33,7 +39,7 @@ function shortCard(name: string, mask: string): string {
   return mask ? `${base} ··${mask}` : base;
 }
 
-// The two Amex logins belong to two different master accounts (for example,
+// The household's logins belong to different master accounts (for example,
 // two people in one household). Every card/credit carries its login's
 // display label (configured in the dashboard settings) so the two master
 // accounts are always distinguishable. The badge color is derived from the
@@ -77,6 +83,14 @@ function productPrefix(accountName: string): string {
   if (n.includes("platinum")) return "Plat";
   if (n.includes("gold")) return "Gold";
   return accountName.replace(/®/g, "").replace(" Card", "").trim().split(/\s+/)[0] ?? "";
+}
+
+/**
+ * The prefix a credit row carries: the account's user-set nickname when
+ * one exists (e.g. UA / UABus), otherwise the product-derived prefix.
+ */
+function prefixFor(c: Credit): string {
+  return c.accountNickname !== "" ? c.accountNickname : productPrefix(c.accountName);
 }
 
 function PrefixChip({ label }: { label: string }) {
@@ -209,11 +223,11 @@ export function App() {
             <p className="mt-1 text-sm text-[var(--dim)]">
               {dash.data
                 ? dash.data.lastImportAt
-                  ? `Amex postings imported ${new Date(dash.data.lastImportAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${dash.data.accounts.filter((a) => !a.ignored).length} cards tracked · current periods only${dash.data.dataCoverageStart ? ` · postings kept from ${new Date(`${dash.data.dataCoverageStart}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — refreshes only add the last 30 days, older postings are never removed` : ""}`
+                  ? `Card postings imported ${new Date(dash.data.lastImportAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · ${dash.data.accounts.filter((a) => !a.ignored).length} cards tracked · current periods only${dash.data.dataCoverageStart ? ` · postings kept from ${new Date(`${dash.data.dataCoverageStart}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} — refreshes only add the last 30 days, older postings are never removed` : ""}`
                   : refreshing
-                    ? "Pulling your Amex cards from Plaid — your credits will appear here in a minute."
-                    : "No Plaid import yet — tap Refresh to pull your Amex credits."
-                : "Loading your Amex credits…"}
+                    ? "Pulling your cards from Plaid — your credits will appear here in a minute."
+                    : "No Plaid import yet — tap Refresh to pull your credits."
+                : "Loading your credits…"}
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -257,7 +271,7 @@ export function App() {
         )}
         {refreshing && (
           <p className="mb-3 text-sm text-[var(--dim)]">
-            Reading your Amex accounts from Plaid — this can take a minute. The list below updates when it lands.
+            Reading your card accounts from Plaid — this can take a minute. The list below updates when it lands.
           </p>
         )}
 
@@ -476,6 +490,13 @@ function CreditRow({
     mutationFn: (enrolled: boolean) => api.updateCredit({ id: c.id, enrolled }),
     onSuccess: onChanged,
   });
+  const confirmAnchor = useMutation({
+    mutationFn: () => api.updateCredit({ id: c.id, anchorConfirmed: true }),
+    onSuccess: onChanged,
+  });
+  // An anchor that came from the catalog is a placeholder guess: the
+  // credit warns until the user confirms it (or corrects it in Edit).
+  const anchorUnconfirmed = !c.anchorConfirmed && c.anchorMonth != null && c.anchorDay != null;
 
   return (
     <li className={nested ? "py-3" : "px-4 py-3"}>
@@ -489,12 +510,17 @@ function CreditRow({
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
             <div className="text-base font-medium leading-snug">
-              {!nested && <PrefixChip label={productPrefix(c.accountName)} />}
+              {!nested && <PrefixChip label={prefixFor(c)} />}
               {nested ? shortCard(c.accountName, c.mask) : c.name}
               <OwnerBadge owner={c.owner} />
               {!c.enrolled && (
                 <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
                   not enrolled
+                </span>
+              )}
+              {anchorUnconfirmed && (
+                <span className="ml-2 rounded bg-[var(--bg)] px-1.5 py-0.5 text-xs font-medium text-[var(--warn)]">
+                  anchor unconfirmed
                 </span>
               )}
             </div>
@@ -506,18 +532,18 @@ function CreditRow({
           </div>
           <div className="shrink-0 text-right">
             <div className={`${MONO} text-xl font-semibold`} style={{ color }}>
-              {done ? money(0) : money(c.currentRemaining)}
+              {done ? money(0, c.currency) : money(c.currentRemaining, c.currency)}
             </div>
             <div className="text-xs text-[var(--dim)]">
               {done ? `used up ✓ · renews ${fmtDay(c.nextPeriodStart)}` : `${c.daysLeft}d left ${periodWord(c.period)}`}
             </div>
           </div>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg)]" role="img" aria-label={`${money(c.currentUsed)} of ${money(c.amount)} used`}>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg)]" role="img" aria-label={`${money(c.currentUsed, c.currency)} of ${money(c.amount, c.currency)} used`}>
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
         </div>
         <div className={`${MONO} mt-1 text-xs text-[var(--dim)]`}>
-          {money(c.currentUsed)} of {money(c.amount)} posted
+          {money(c.currentUsed, c.currency)} of {money(c.amount, c.currency)} posted
         </div>
       </button>
 
@@ -526,6 +552,24 @@ function CreditRow({
           {c.note && <p className="mb-2 text-sm text-[var(--dim)]">{c.note}</p>}
           {c.enrollmentRequired && c.enrollmentNote && (
             <p className="mb-2 text-sm font-medium text-[var(--warn)]">{c.enrollmentNote}</p>
+          )}
+          {anchorUnconfirmed && (
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <p className="text-sm font-medium text-[var(--warn)]">
+                This credit's anniversary anchor ({c.anchorMonth}/{c.anchorDay}) is the catalog
+                default and hasn't been confirmed — if your card's anniversary differs, its
+                period is wrong. Confirm it here, or correct it under Edit credit.
+              </p>
+              <button
+                type="button"
+                aria-label={`Confirm the anniversary anchor for ${c.name}`}
+                disabled={confirmAnchor.isPending}
+                onClick={() => confirmAnchor.mutate()}
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                Confirm anchor
+              </button>
+            </div>
           )}
 
           {c.currentPostings.length > 0 ? (
@@ -538,7 +582,7 @@ function CreditRow({
                       <span className="text-[var(--dim)]"> · posted {p.postedDate}</span>
                     )}
                   </span>
-                  <span className={MONO}>{money(p.amount)}</span>
+                  <span className={MONO}>{money(p.amount, c.currency)}</span>
                 </li>
               ))}
             </ul>
@@ -608,7 +652,7 @@ function GroupRow({
         <div className="flex items-baseline justify-between gap-3">
           <div className="min-w-0">
             <div className="text-base font-medium leading-snug">
-              <PrefixChip label={[...new Set(g.members.map((m) => productPrefix(m.accountName)))].join("/")} />
+              <PrefixChip label={[...new Set(g.members.map((m) => prefixFor(m)))].join("/")} />
               {g.name}
               {g.owners.map((o) => (
                 <OwnerBadge key={o} owner={o} />
@@ -628,18 +672,18 @@ function GroupRow({
           </div>
           <div className="shrink-0 text-right">
             <div className={`${MONO} text-xl font-semibold`} style={{ color }}>
-              {done ? money(0) : money(g.remaining)}
+              {done ? money(0, g.members[0]!.currency) : money(g.remaining, g.members[0]!.currency)}
             </div>
             <div className="text-xs text-[var(--dim)]">
               {done ? `used up ✓ · renews ${fmtDay(g.members[0]!.nextPeriodStart)}` : `${g.daysLeft}d left ${periodWord(g.period)}`}
             </div>
           </div>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg)]" role="img" aria-label={`${money(g.used)} of ${money(g.amount)} used across ${g.members.length} cards`}>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg)]" role="img" aria-label={`${money(g.used, g.members[0]!.currency)} of ${money(g.amount, g.members[0]!.currency)} used across ${g.members.length} cards`}>
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
         </div>
         <div className={`${MONO} mt-1 text-xs text-[var(--dim)]`}>
-          {money(g.used)} of {money(g.amount)} posted
+          {money(g.used, g.members[0]!.currency)} of {money(g.amount, g.members[0]!.currency)} posted
         </div>
       </button>
 
@@ -679,8 +723,9 @@ function ManualEntryForm({ credit: c, onChanged }: { credit: Credit; onChanged: 
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!(Number(amount) > 0)) {
-      setMsg("Enter an amount above $0.");
+    const value = Number(amount);
+    if (amount.trim() === "" || Number.isNaN(value) || value === 0) {
+      setMsg("Enter an amount: positive for credit received, negative for a clawback. $0 doesn't count.");
       return;
     }
     add.mutate();
@@ -690,13 +735,13 @@ function ManualEntryForm({ credit: c, onChanged }: { credit: Credit; onChanged: 
       <div className="mb-2 text-sm font-medium">Used some of this off-statement? Record it</div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="block">
-          <span className="mb-1 block text-xs text-[var(--dim)]">Amount $</span>
+          <span className="mb-1 block text-xs text-[var(--dim)]">Amount $ (negative = clawback)</span>
           <input
             aria-label="Manual credit amount in dollars"
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder="50"
+            placeholder="50 or -50"
             className={`${MONO} w-24 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm`}
           />
         </label>
@@ -753,6 +798,7 @@ function EditCreditForm({
   const [pattern, setPattern] = useState(c.matchPattern);
   const [note, setNote] = useState(c.note);
   const [msg, setMsg] = useState<string | null>(null);
+  const anchored = period === "annual" || period === "semiannual";
   const save = useMutation({
     mutationFn: () =>
       api.updateCredit({
@@ -760,8 +806,10 @@ function EditCreditForm({
         name: name.trim(),
         amount: Number(amount),
         period,
-        anchorMonth: period === "annual" && anchorMonth !== "" ? Number(anchorMonth) : null,
-        anchorDay: period === "annual" && anchorDay !== "" ? Number(anchorDay) : null,
+        // The anchor is a pair: both fields, or neither (cleared). The
+        // submit handler rejects a half-filled pair before we get here.
+        anchorMonth: anchored && anchorMonth !== "" ? Number(anchorMonth) : null,
+        anchorDay: anchored && anchorDay !== "" ? Number(anchorDay) : null,
         matchPattern: pattern.trim().toLowerCase(),
         note: note.trim(),
       }),
@@ -780,6 +828,10 @@ function EditCreditForm({
     e.preventDefault();
     if (name.trim() === "" || !(Number(amount) >= 0)) {
       setMsg("Name is required and amount must be $0 or more.");
+      return;
+    }
+    if (anchored && (anchorMonth === "") !== (anchorDay === "")) {
+      setMsg("Anchor month and day are a pair — fill in both, or clear both (blank = calendar cycle).");
       return;
     }
     save.mutate();
@@ -801,7 +853,7 @@ function EditCreditForm({
           <select aria-label="Credit period" value={period} onChange={(e) => setPeriod(e.target.value as Period)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm">
             <option value="monthly">Monthly</option>
             <option value="quarterly">Quarterly</option>
-            <option value="semiannual">Semiannual (Jan–Jun / Jul–Dec)</option>
+            <option value="semiannual">Semiannual (6-month halves)</option>
             <option value="annual">Annual</option>
           </select>
         </label>
@@ -809,14 +861,14 @@ function EditCreditForm({
           <span className="mb-1 block text-xs text-[var(--dim)]">Plaid posting match (substring)</span>
           <input aria-label="Plaid posting match substring" value={pattern} onChange={(e) => setPattern(e.target.value)} placeholder="e.g. lululemon" className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm" />
         </label>
-        {period === "annual" && (
+        {anchored && (
           <>
             <label className="block">
-              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor month (blank = calendar year)</span>
+              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor month (blank = calendar cycle)</span>
               <input aria-label="Anniversary anchor month" inputMode="numeric" value={anchorMonth} onChange={(e) => setAnchorMonth(e.target.value)} placeholder="e.g. 5 for May" className={`${MONO} w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm`} />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor day</span>
+              <span className="mb-1 block text-xs text-[var(--dim)]">Anniversary anchor day (set both, or neither)</span>
               <input aria-label="Anniversary anchor day" inputMode="numeric" value={anchorDay} onChange={(e) => setAnchorDay(e.target.value)} placeholder="e.g. 1" className={`${MONO} w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm`} />
             </label>
           </>
@@ -861,13 +913,17 @@ function UnassignedSection({ data, onChanged }: { data: Dashboard; onChanged: ()
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
-        <span className="text-base font-medium">Unassigned postings ({data.unassigned.length})</span>
+        <span className="text-base font-medium">Unassigned postings ({data.unassignedCount})</span>
         <span className="text-sm text-[var(--dim)]">{open ? "Hide" : "Review"}</span>
       </button>
       {open && (
         <ul className="divide-y divide-[var(--border)] border-t border-[var(--border)]">
           {data.unassigned.map((p) => {
-            const options = data.credits.filter((c) => c.accountId === p.accountId);
+            // Only stored credits are assignable targets: a synthesized
+            // (negative-id) entry has no row a posting can point at —
+            // it materializes only when the user acts on the credit
+            // itself, never from this dropdown.
+            const options = data.credits.filter((c) => c.accountId === p.accountId && c.id > 0);
             return (
               <li key={p.id} className="px-4 py-3">
                 <div className="flex items-baseline justify-between gap-2">
@@ -877,7 +933,7 @@ function UnassignedSection({ data, onChanged }: { data: Dashboard; onChanged: ()
                       <span className="text-[var(--dim)]"> · posted {p.postedDate}</span>
                     )}
                   </span>
-                  <span className={MONO}>{money(p.amount)}</span>
+                  <span className={MONO}>{money(p.amount, p.currency)}</span>
                 </div>
                 <div className="mt-1 text-xs text-[var(--dim)]">
                   {shortCard(p.accountName, p.mask)}
@@ -898,7 +954,7 @@ function UnassignedSection({ data, onChanged }: { data: Dashboard; onChanged: ()
                       <option value="">Assign to a credit…</option>
                       {options.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {productPrefix(c.accountName)} · {c.name}
+                          {prefixFor(c)} · {c.name}
                         </option>
                       ))}
                     </select>
@@ -1077,9 +1133,154 @@ function DisplaySettingsSection({ onChanged }: { onChanged: () => void }) {
               ))}
             </ul>
           )}
+          {prefs.data && <TimezoneControl current={prefs.data.timezone} onChanged={onChanged} />}
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Per-account display prefix (nickname): the short label credit rows
+ * carry (UA, UABus, …). User-owned — Plaid re-imports never overwrite
+ * it; it is stored on the account via updateAccount.
+ */
+function NicknameForm({
+  accountId,
+  accountLabel,
+  nickname,
+  onChanged,
+}: {
+  accountId: number;
+  accountLabel: string;
+  nickname: string;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(nickname);
+  const [msg, setMsg] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => api.updateAccount({ accountId, nickname: value.trim() }),
+    onSuccess: () => {
+      setOpen(false);
+      onChanged();
+    },
+    onError: (e) => setMsg(String(e)),
+  });
+  if (!open) {
+    return (
+      <button
+        type="button"
+        aria-label={`${nickname ? "Change" : "Set"} display prefix for ${accountLabel}`}
+        onClick={() => setOpen(true)}
+        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+      >
+        {nickname ? "Change prefix" : "Set prefix"}
+      </button>
+    );
+  }
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        save.mutate();
+      }}
+      className="flex flex-wrap items-center gap-2"
+      aria-label={`Display prefix for ${accountLabel}`}
+    >
+      <input
+        aria-label={`Display prefix for ${accountLabel}`}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="e.g. UA"
+        maxLength={24}
+        className="w-28 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm"
+      />
+      <button
+        type="submit"
+        aria-label="Save display prefix"
+        disabled={save.isPending}
+        className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+      >
+        Save prefix
+      </button>
+      <button
+        type="button"
+        aria-label="Cancel editing display prefix"
+        onClick={() => setOpen(false)}
+        className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+      >
+        Cancel
+      </button>
+      {msg && <span className="text-sm text-[var(--bad)]">{msg}</span>}
+    </form>
+  );
+}
+
+const TIMEZONE_CHOICES = [
+  "America/Los_Angeles",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "UTC",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Shanghai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+/**
+ * The timezone "today" and every period boundary are computed in.
+ * Stored server-side (meta `timezone`); America/Los_Angeles until set.
+ */
+function TimezoneControl({ current, onChanged }: { current: string; onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (timezone: string) => api.setTimezone({ timezone }),
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ["preferences"] });
+      onChanged();
+    },
+    onError: (e) => setError(String(e)),
+  });
+  const choices = TIMEZONE_CHOICES.includes(current)
+    ? TIMEZONE_CHOICES
+    : [current, ...TIMEZONE_CHOICES];
+  return (
+    <div className="mt-4 border-t border-[var(--border)] pt-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--dim)]">
+        Timezone
+      </div>
+      <label className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-[var(--dim)]">“Today” and period boundaries use</span>
+        <select
+          aria-label="Dashboard timezone"
+          value={current}
+          disabled={save.isPending}
+          onChange={(e) => save.mutate(e.target.value)}
+          className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-sm"
+        >
+          {choices.map((tz) => (
+            <option key={tz} value={tz}>
+              {tz}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-[var(--bad)]">
+          Couldn't save the timezone: {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1149,12 +1350,25 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                         : a.hasCatalog
                           ? "Credits tracked"
                           : "No statement credits in the catalog"}
+                      {a.nickname !== "" && ` · shown as "${a.nickname}"`}
                     </span>
                   </span>
                   <span className={`${MONO} text-sm text-[var(--dim)]`}>
-                    {a.balance != null ? money(a.balance) : ""}
+                    {a.balance != null ? money(a.balance, a.currency ?? "USD") : ""}
                   </span>
                 </div>
+                {a.suspectedDuplicate && (
+                  <p className="mt-1 text-sm font-medium text-[var(--warn)]">
+                    Possible duplicate of{" "}
+                    {a.duplicateSuspectIds
+                      .map((id) => data.accounts.find((x) => x.id === id))
+                      .filter((x): x is NonNullable<typeof x> => x != null)
+                      .map((x) => shortCard(x.name, x.mask))
+                      .join("; ")}
+                    {" "}— both records are counted in every total until you mark one as a
+                    duplicate below. If they are genuinely separate cards, no action is needed.
+                  </p>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -1165,6 +1379,15 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                     {a.ignored ? "Un-ignore" : "Ignore as duplicate"}
                   </button>
                   {!a.ignored && <AddCreditForm accountId={a.id} accountLabel={shortCard(a.name, a.mask)} onChanged={onChanged} />}
+                  {!a.ignored && (
+                    <NicknameForm
+                      key={`${a.id}:${a.nickname}`}
+                      accountId={a.id}
+                      accountLabel={shortCard(a.name, a.mask)}
+                      nickname={a.nickname}
+                      onChanged={onChanged}
+                    />
+                  )}
                 </div>
               </li>
                 ))}
@@ -1178,7 +1401,7 @@ function AccountsSection({ data, onChanged }: { data: Dashboard; onChanged: () =
                 {inactive.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
                     <span>
-                      <PrefixChip label={productPrefix(c.accountName)} />
+                      <PrefixChip label={prefixFor(c)} />
                       {c.name} <span className="text-[var(--dim)]">· {shortCard(c.accountName, c.mask)}</span>
                       <OwnerBadge owner={c.owner} />
                     </span>
