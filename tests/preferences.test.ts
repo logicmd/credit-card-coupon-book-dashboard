@@ -7,10 +7,13 @@ import { ALEX_BIZ_PLAT } from "./fixtures/sample";
  * Display-exclusion preference: which credits the dashboard hides. The
  * preference lives in the meta table (`excludedCredits`, a JSON list of
  * name patterns) and is changed ONLY through the getPreferences /
- * setExcludedCredits actions — there is no settings UI; the user's
- * assistant flips it from chat. Fixtures are fictional, like the rest of
- * the suite (Alex's Business Platinum plus an added "ChatGPT Business
- * Credit", a member of one of the default-hidden families).
+ * setExcludedCredits actions — both writers go through them: the
+ * dashboard's Display settings section (one toggle per hideable family)
+ * and the user's assistant from chat. getPreferences is the UI-facing
+ * read: alongside the effective list it returns every hideable family
+ * with its current hidden/shown state. Fixtures are fictional, like the
+ * rest of the suite (Alex's Business Platinum plus an added "ChatGPT
+ * Business Credit", a member of one of the default-hidden families).
  */
 
 async function seedBizPlatWithHiddenCredit() {
@@ -40,6 +43,25 @@ describe("exclusion preference — defaults", () => {
     const db = createTestDb();
     const prefs: any = await Actions.getPreferences.handler(fakeCtx(db), {});
     expect(prefs.excludedCredits).toEqual([...DEFAULT_EXCLUDED_PATTERNS]);
+  });
+
+  test("getPreferences lists every hideable family with its default hidden state", async () => {
+    const db = createTestDb();
+    const prefs: any = await Actions.getPreferences.handler(fakeCtx(db), {});
+    // The Display settings toggles render from exactly this list: the
+    // seven default-hidden families report hidden, the two opt-in
+    // families (Global Entry, FareLock) report shown.
+    expect(prefs.hideableFamilies).toEqual([
+      { pattern: "chatgpt", label: "ChatGPT Business Credit", hidden: true },
+      { pattern: "indeed", label: "Indeed Credit", hidden: true },
+      { pattern: "adobe", label: "Adobe Credit", hidden: true },
+      { pattern: "clear", label: "CLEAR+ Credit", hidden: true },
+      { pattern: "equinox", label: "Equinox Credit", hidden: true },
+      { pattern: "entertainment", label: "Digital Entertainment Credit", hidden: true },
+      { pattern: "walmart", label: "Walmart+ Credit", hidden: true },
+      { pattern: "global entry", label: "Global Entry Credit", hidden: false },
+      { pattern: "farelock", label: "FareLock Credit", hidden: false },
+    ]);
   });
 
   test("default exclusions apply when the preference was never set", async () => {
@@ -137,6 +159,71 @@ describe("exclusion preference — changes via the actions", () => {
     expect(dash.excludedPatterns).toEqual([]);
     expect(dash.credits.map((c: any) => c.name)).toContain("ChatGPT Business Credit");
     expect(dash.hiddenCredits).toEqual([]);
+    // A stored empty list is a real user selection, not "unset": the
+    // UI-facing read reports every family shown (the defaults do NOT
+    // come back).
+    const prefs: any = await Actions.getPreferences.handler(ctx, {});
+    expect(prefs.excludedCredits).toEqual([]);
+    expect(prefs.hideableFamilies.every((f: any) => !f.hidden)).toBe(true);
+  });
+
+  test("Display-settings style toggles round-trip through getPreferences / setExcludedCredits", async () => {
+    const { ctx } = await seedBizPlatWithHiddenCredit();
+    const familyState = async (pattern: string) => {
+      const prefs: any = await Actions.getPreferences.handler(ctx, {});
+      return prefs.hideableFamilies.find((f: any) => f.pattern === pattern);
+    };
+
+    // Toggle ChatGPT OFF (show it): the settings UI removes every entry
+    // that hides the family from the effective list and saves the
+    // complete list back through setExcludedCredits.
+    let prefs: any = await Actions.getPreferences.handler(ctx, {});
+    const shown = prefs.excludedCredits.filter(
+      (e: string) => !"chatgpt business credit".includes(e),
+    );
+    await Actions.setExcludedCredits.handler(ctx, { excludedCredits: shown });
+    expect(await familyState("chatgpt")).toEqual({
+      pattern: "chatgpt",
+      label: "ChatGPT Business Credit",
+      hidden: false,
+    });
+    let dash: any = await Actions.getDashboard.handler(ctx, {});
+    expect(dash.credits.map((c: any) => c.name)).toContain("ChatGPT Business Credit");
+
+    // Toggle FareLock ON (hide it): the UI appends the family's pattern.
+    prefs = await Actions.getPreferences.handler(ctx, {});
+    await Actions.setExcludedCredits.handler(ctx, {
+      excludedCredits: [...prefs.excludedCredits, "farelock"],
+    });
+    expect(await familyState("farelock")).toEqual({
+      pattern: "farelock",
+      label: "FareLock Credit",
+      hidden: true,
+    });
+    // The other toggles are untouched by either save.
+    expect((await familyState("indeed")).hidden).toBe(true);
+    expect((await familyState("global entry")).hidden).toBe(false);
+    expect((await familyState("chatgpt")).hidden).toBe(false);
+    dash = await Actions.getDashboard.handler(ctx, {});
+    expect(dash.excludedPatterns).toContain("farelock");
+  });
+
+  test("a family stored under its full credit name still reports hidden", async () => {
+    const { ctx } = await seedBizPlatWithHiddenCredit();
+    // Chat can store the full name instead of the short pattern; the
+    // toggle state must reflect the same substring matching the
+    // dashboard filter uses, or the UI would show it as "shown" while
+    // the dashboard hides it.
+    await Actions.setExcludedCredits.handler(ctx, {
+      excludedCredits: ["Global Entry Credit"],
+    });
+    const prefs: any = await Actions.getPreferences.handler(ctx, {});
+    expect(
+      prefs.hideableFamilies.find((f: any) => f.pattern === "global entry").hidden,
+    ).toBe(true);
+    expect(
+      prefs.hideableFamilies.find((f: any) => f.pattern === "chatgpt").hidden,
+    ).toBe(false);
   });
 
   test("unknown credit names are rejected and the stored preference is unchanged", async () => {

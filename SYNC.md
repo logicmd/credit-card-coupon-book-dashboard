@@ -51,8 +51,11 @@ just faster — repo, test, push, deploy.
 - Display exclusion list as a stored database preference (meta
   `excludedCredits`, a JSON list of name patterns; the built-in list
   applies until a preference is stored), read and changed only through
-  the `getPreferences` / `setExcludedCredits` actions from chat — no
-  settings UI; pinned credits; grouped totals across cards and logins;
+  the `getPreferences` / `setExcludedCredits` actions — used both by
+  the page's Display settings section (a toggle per hideable family;
+  `getPreferences` also returns the families with their effective
+  hidden state) and by the assistant from chat; pinned credits;
+  grouped totals across cards and logins;
   Cards section grouped by issuer, then login; used-up credits surface
   their next-period renewal date.
 - Compute-time catalog synthesis: credit instances are materialized at

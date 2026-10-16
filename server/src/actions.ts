@@ -146,10 +146,14 @@ export function nonSeededDefsFor(accountName: string): CreditDef[] {
 //   the preference has never been set,
 //   DEFAULT_EXCLUDED_PATTERNS applies — the built-in list covering
 //   ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, digital
-//   entertainment, and Walmart+.
-//   There is deliberately no settings UI for this on the web page: the
-//   user changes it by asking their assistant in chat, which calls the
-//   getPreferences / setExcludedCredits actions.
+//   entertainment, and Walmart+. Once the user saves their own selection
+//   (including an empty one = show everything), it is authoritative and
+//   the built-in list never applies again.
+//   The list is NOT hardcoded: the dashboard page has a Display settings
+//   section with a toggle per hideable family (HIDEABLE_FAMILIES), and
+//   the user's assistant can also change it from chat. Both paths go
+//   through the same getPreferences / setExcludedCredits actions and the
+//   same stored preference — there is no second storage path.
 // - Always display: Business Gold Flexible Business Credit ($20/mo, office
 //   supply) and Business Platinum Wireless Credit ($10/mo, mobile phone
 //   bill). These are pinned active in the dashboard view even if an earlier
@@ -171,19 +175,29 @@ export const DEFAULT_EXCLUDED_PATTERNS = [
 ];
 
 /**
- * Canonical display names for the credit families the default patterns
- * hide. setExcludedCredits validation accepts an entry when it matches
- * one of these names (or a catalog / stored credit name).
+ * The credit families the user can hide or show: the canonical toggle
+ * list behind the dashboard's Display settings section. `pattern` is the
+ * exclusion entry toggling the family on writes into the preference;
+ * `label` is the human-readable credit name shown next to the toggle.
+ * The first seven are the families the built-in defaults hide; the rest
+ * start out shown but can be hidden the same way.
+ * setExcludedCredits validation accepts an entry when it matches one of
+ * these labels (or a catalog / stored credit name).
  */
-export const HIDEABLE_CREDIT_NAMES = [
-  "ChatGPT Business Credit",
-  "Indeed Credit",
-  "Adobe Credit",
-  "CLEAR+ Credit",
-  "Equinox Credit",
-  "Digital Entertainment Credit",
-  "Walmart+ Credit",
+export const HIDEABLE_FAMILIES: { pattern: string; label: string }[] = [
+  { pattern: "chatgpt", label: "ChatGPT Business Credit" },
+  { pattern: "indeed", label: "Indeed Credit" },
+  { pattern: "adobe", label: "Adobe Credit" },
+  { pattern: "clear", label: "CLEAR+ Credit" },
+  { pattern: "equinox", label: "Equinox Credit" },
+  { pattern: "entertainment", label: "Digital Entertainment Credit" },
+  { pattern: "walmart", label: "Walmart+ Credit" },
+  { pattern: "global entry", label: "Global Entry Credit" },
+  { pattern: "farelock", label: "FareLock Credit" },
 ];
+
+/** Canonical display names of the hideable families (derived, see above). */
+export const HIDEABLE_CREDIT_NAMES = HIDEABLE_FAMILIES.map((f) => f.label);
 
 /** Every credit name in the built-in catalogs (all products). */
 const ALL_CATALOG_CREDIT_NAMES: string[] = [
@@ -614,8 +628,9 @@ async function computeDashboard(
         metaRows.find((r) => r.key === "dataCoverageStart")?.value ?? null;
       const lastRefreshWindowStart =
         metaRows.find((r) => r.key === "lastRefreshWindowStart")?.value ?? null;
-      // Display-exclusion preference: the stored list when the user (via
-      // their assistant) has set one, otherwise the built-in defaults.
+      // Display-exclusion preference: the stored list when the user has
+      // set one (Display settings toggles or their assistant in chat),
+      // otherwise the built-in defaults.
       const excludedPatterns =
         parseExcludedPatterns(
           metaRows.find((r) => r.key === EXCLUDED_CREDITS_META_KEY)?.value,
@@ -1337,24 +1352,48 @@ export const Actions = {
 
   // Display-exclusion preference: which credits the dashboard hides.
   // Stored in meta as JSON under `excludedCredits`; when it has never been
-  // set, the built-in DEFAULT_EXCLUDED_PATTERNS applies. There is no
-  // settings UI on the web page — the user asks their assistant in chat
-  // and the assistant reads / rewrites the preference through these two
-  // actions. Hidden credits stay out of the dashboard list and every
+  // set, the built-in DEFAULT_EXCLUDED_PATTERNS applies, and once the user
+  // stores a selection it is authoritative (an empty list shows
+  // everything). Two writers, one storage path: the dashboard's Display
+  // settings section (a toggle per hideable family) and the user's
+  // assistant in chat both read / rewrite the preference through these
+  // two actions. Hidden credits stay out of the dashboard list and every
   // total, and are named in the Agent Markdown so an assistant knows they
   // exist.
   getPreferences: defineAction({
     request: z.object({}),
-    response: z.object({ excludedCredits: z.array(z.string()) }),
+    response: z.object({
+      /** The effective exclusion list in force (stored, or the defaults). */
+      excludedCredits: z.array(z.string()),
+      /**
+       * Every hideable family with its label and whether the effective
+       * list currently hides it — the read the Display settings toggles
+       * render from. `hidden` uses the same substring matching as the
+       * dashboard filter, so a family stored under its full credit name
+       * (not the short pattern) still reports hidden.
+       */
+      hideableFamilies: z.array(
+        z.object({
+          pattern: z.string(),
+          label: z.string(),
+          hidden: z.boolean(),
+        }),
+      ),
+    }),
     async handler(ctx) {
       const db = ctx.db<typeof schema>();
       const rows = await db
         .select()
         .from(schema.meta)
         .where(eq(schema.meta.key, EXCLUDED_CREDITS_META_KEY));
+      const excludedCredits =
+        parseExcludedPatterns(rows[0]?.value) ?? [...DEFAULT_EXCLUDED_PATTERNS];
       return {
-        excludedCredits:
-          parseExcludedPatterns(rows[0]?.value) ?? [...DEFAULT_EXCLUDED_PATTERNS],
+        excludedCredits,
+        hideableFamilies: HIDEABLE_FAMILIES.map((f) => ({
+          ...f,
+          hidden: isExcludedName(f.label, excludedCredits),
+        })),
       };
     },
   }),

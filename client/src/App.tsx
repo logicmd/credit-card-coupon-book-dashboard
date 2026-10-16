@@ -290,6 +290,7 @@ export function App() {
             <ActionList data={dash.data} onChanged={invalidate} />
             <UnassignedSection data={dash.data} onChanged={invalidate} />
             <AccountsSection data={dash.data} onChanged={invalidate} />
+            <DisplaySettingsSection onChanged={invalidate} />
           </>
         )}
       </main>
@@ -918,6 +919,107 @@ function LoginLabelsForm({
       </p>
       {msg && <p className="mt-2 text-sm text-[var(--dim)]">{msg}</p>}
     </form>
+  );
+}
+
+// Display settings: which credit families this dashboard hides. The
+// toggle list and the current hidden/shown state come from the
+// getPreferences action (the effective preference — the stored list, or
+// the built-in defaults when nothing was ever saved); flipping a toggle
+// writes the complete new list back through setExcludedCredits, the same
+// stored preference (meta `excludedCredits`) the assistant edits from
+// chat. There is no separate storage: once the user saves a selection
+// here it is authoritative, including "nothing hidden".
+function DisplaySettingsSection({ onChanged }: { onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const prefs = useQuery({ queryKey: ["preferences"], queryFn: () => api.getPreferences({}) });
+  const save = useMutation({
+    mutationFn: (excludedCredits: string[]) => api.setExcludedCredits({ excludedCredits }),
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ["preferences"] });
+      onChanged();
+    },
+    onError: (e) => setError(String(e)),
+  });
+
+  const families = prefs.data?.hideableFamilies ?? [];
+  const hiddenCount = families.filter((f) => f.hidden).length;
+
+  const toggle = (family: { pattern: string; label: string; hidden: boolean }) => {
+    if (!prefs.data || save.isPending) return;
+    const current = prefs.data.excludedCredits;
+    // An entry hides this family when the family's credit name contains
+    // it (the server's substring rule), so both the short pattern
+    // ("chatgpt") and a full credit name stored from chat count.
+    const hidesFamily = (entry: string) =>
+      family.label.toLowerCase().includes(entry.toLowerCase());
+    const next = family.hidden
+      ? current.filter((e) => !hidesFamily(e))
+      : current.some(hidesFamily)
+        ? current
+        : [...current, family.pattern];
+    if (next !== current) save.mutate(next);
+  };
+
+  return (
+    <section aria-label="Display settings" className="mt-5 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+      <button
+        type="button"
+        aria-label="Toggle display settings"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="text-base font-medium">
+          Display settings{prefs.data && hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
+        </span>
+        <span className="text-sm text-[var(--dim)]">{open ? "Hide" : "Manage"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-[var(--border)] px-4 py-3">
+          <p className="text-sm text-[var(--dim)]">
+            Choose which credit families appear here. Hidden credits never count in any total; they
+            are still listed under “Hidden by preference” in the Agent Markdown. Your selection is
+            saved as your own preference — the built-in defaults only apply until you change
+            something here (or ask your assistant in chat, which edits the same preference).
+          </p>
+          {prefs.isPending && <p className="mt-3 text-sm text-[var(--dim)]">Loading…</p>}
+          {prefs.error && (
+            <p role="alert" className="mt-3 text-sm text-[var(--bad)]">
+              Couldn't load display settings: {String(prefs.error)}
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="mt-3 text-sm text-[var(--bad)]">
+              Couldn't save display settings: {error}
+            </p>
+          )}
+          {prefs.data && (
+            <ul className="mt-1 divide-y divide-[var(--border)]">
+              {families.map((f) => (
+                <li key={f.pattern} className="flex items-center justify-between gap-3 py-2.5">
+                  <span className="text-sm">{f.label}</span>
+                  <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+                    <span className="text-[var(--dim)]">{f.hidden ? "Hidden" : "Shown"}</span>
+                    <input
+                      type="checkbox"
+                      aria-label={`Show ${f.label}`}
+                      checked={!f.hidden}
+                      disabled={save.isPending}
+                      onChange={() => toggle(f)}
+                      className="h-4 w-4 accent-[var(--accent)]"
+                    />
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

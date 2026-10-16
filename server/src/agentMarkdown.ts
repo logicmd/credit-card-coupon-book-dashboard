@@ -121,8 +121,9 @@ export function renderAgentMarkdown(data: DashboardData, generatedAt: Date): str
     out.push("");
     out.push(
       "These credits are hidden by your display preference and are not counted " +
-        "in any total above. There is no settings page for this — ask your " +
-        "assistant in chat to show or hide a credit and it will update the preference.",
+        "in any total above. To change which credits are hidden, use the Display " +
+        "settings section on the dashboard page, or ask your assistant in chat — " +
+        "both update the same preference.",
     );
     out.push("");
     if (data.hiddenCredits.length > 0) {
