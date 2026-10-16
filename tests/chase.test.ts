@@ -70,7 +70,7 @@ describe("Chase import — issuer, catalog seeding, anchored periods", () => {
     const credits = await db.select().from(schema.credits);
     const byName = new Map(credits.map((c) => [c.name, c]));
     expect(byName.get("Annual Hotel Credit")).toEqual(
-      expect.objectContaining({ amount: 50, period: "annual", anchorMonth: 5, anchorDay: 1 }),
+      expect.objectContaining({ amount: 100, period: "annual", anchorMonth: 5, anchorDay: 1 }),
     );
     expect(byName.get("Hyatt Credit")).toEqual(
       expect.objectContaining({ amount: 100, period: "annual", anchorMonth: 5, anchorDay: 1 }),
@@ -102,9 +102,11 @@ describe("Chase import — issuer, catalog seeding, anchored periods", () => {
     expect(hotel.periodLabel).toBe(anniversary.label);
     expect(hotel.anchorMonth).toBe(5);
     expect(hotel.anchorDay).toBe(1);
+    // The $50 posting is the pre-refresh credit the holder already used;
+    // under the $100 cap (2026 refresh) the other $50 remains this year.
     expect(hotel.currentUsed).toBe(50);
-    expect(hotel.currentRemaining).toBe(0);
-    // Fully used → the next period start is surfaced for the renews display.
+    expect(hotel.currentRemaining).toBe(50);
+    // The next period start is surfaced for the renews display.
     expect(hotel.nextPeriodStart).toBe(addDays(anniversary.end, 1));
 
     // Both $50 "CREDIT ADJUSTMENT" postings landed on the Hyatt credit.

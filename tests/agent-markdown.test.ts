@@ -108,11 +108,11 @@ function sampleDashboard(): DashboardData {
       accountName: "Chase Sapphire Preferred®",
       mask: "6666",
       name: "Annual Hotel Credit",
-      amount: 50,
+      amount: 100,
       period: "annual",
       anchorMonth: 5,
       anchorDay: 1,
-      currentRemaining: 50,
+      currentRemaining: 100,
       periodLabel: "May 2026 – April 2027",
       periodStart: "2026-05-01",
       periodEnd: "2027-04-30",
@@ -164,7 +164,7 @@ function sampleDashboard(): DashboardData {
     accounts: [],
     credits,
     unassigned: [],
-    totals: { remainingNow: 340, expiring14: 0, expiring31: 10, openCredits: 5 },
+    totals: { remainingNow: 390, expiring14: 0, expiring31: 10, openCredits: 5 },
   };
 }
 
@@ -174,7 +174,7 @@ describe("renderAgentMarkdown", () => {
     expect(md.startsWith("# Credit Card Coupon Book")).toBe(true);
     expect(md).toContain("Generated: 2026-10-15T12:00:00.000Z");
     expect(md).toContain("Current periods as of 2026-10-15");
-    expect(md).toContain("Total unused in current periods: $340 across 5 open credits");
+    expect(md).toContain("Total unused in current periods: $390 across 5 open credits");
     // Only the Wireless credit ends at the nearest boundary (2026-10-31).
     expect(md).toContain("Expiring soonest: $10 on 2026-10-31 (1 credit)");
   });

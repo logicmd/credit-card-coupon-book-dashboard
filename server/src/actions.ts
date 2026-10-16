@@ -72,7 +72,7 @@ const BIZ_GOLD: CreditDef[] = [
 // ---------------------------------------------------------------------------
 
 const SAPPHIRE_PREFERRED: CreditDef[] = [
-  { name: "Annual Hotel Credit", amount: 50, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "annual hotel credit", note: "Hotel bookings through Chase Travel only; runs on the cardmember anniversary year" },
+  { name: "Annual Hotel Credit", amount: 100, period: "annual", anchorMonth: 5, anchorDay: 1, pattern: "annual hotel credit", note: "Hotel bookings through Chase Travel only; runs on the cardmember anniversary year" },
 ];
 
 const HYATT_BUSINESS: CreditDef[] = [

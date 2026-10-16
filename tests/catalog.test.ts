@@ -61,12 +61,12 @@ describe("catalogFor — product detection", () => {
 });
 
 describe("catalogFor — Chase products", () => {
-  test("Sapphire Preferred gets the $50 hotel credit on a May 1 anniversary anchor", () => {
+  test("Sapphire Preferred gets the $100 hotel credit on a May 1 anniversary anchor", () => {
     const defs = catalogFor("Chase Sapphire Preferred®")!;
     expect(defs).toEqual([
       expect.objectContaining({
         name: "Annual Hotel Credit",
-        amount: 50,
+        amount: 100,
         period: "annual",
         anchorMonth: 5,
         anchorDay: 1,
