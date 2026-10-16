@@ -1,6 +1,6 @@
 # Credit Card Coupon Book Dashboard
 
-Track every Amex and Chase statement credit across all your cards — and actually use them before they expire.
+Track every Amex, Chase and U.S. Bank statement credit across all your cards — and actually use them before they expire.
 
 If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hilton Aspire, Marriott Brilliant, Chase Sapphire Preferred…), each card carries statement credits on different cycles: monthly, quarterly, semi-annual, annual — and some run on your cardmember anniversary year instead of the calendar year. They are easy to forget and issuers do not roll them over. This dashboard pulls your real credit postings from Plaid, matches them against a built-in catalog of each card's credits, and shows — per current period — how much you have used and how much is left, grouped by credit type across cards.
 
@@ -10,7 +10,7 @@ If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hil
 
 ## Supported cards (verified)
 
-"Verified" means two things, and both are required: the card has catalog definitions in this repo (`server/src/actions.ts`), **and** unit tests pin those definitions down — the catalog tests assert each card's credit amounts, cycles, posting-name patterns, and anniversary anchors, and the DB-backed suites exercise the Chase products end to end. Exactly these nine cards qualify:
+"Verified" means two things, and both are required: the card has catalog definitions in this repo (`server/src/actions.ts`), **and** unit tests pin those definitions down — the catalog tests assert each card's credit amounts, cycles, posting-name patterns, and anniversary anchors, and the DB-backed suites exercise the Chase and U.S. Bank products end to end. Exactly these ten cards qualify:
 
 - Amex Platinum
 - Amex Business Platinum
@@ -21,6 +21,7 @@ If you hold multiple cards (Amex Platinum, Business Platinum, Business Gold, Hil
 - Chase World of Hyatt Business
 - Chase IHG One Rewards Premier
 - The Ritz-Carlton Card
+- U.S. Bank Altitude Reserve
 
 Any other card is **not yet supported**. In particular, Chase United cards (e.g. United Explorer) have **not** been verified and count as unsupported: an unsupported account can still show up via Plaid, but its credits are not tracked until a catalog entry exists for it.
 
@@ -77,7 +78,7 @@ Without Muse, the Plaid auto-refresh agent is unavailable; you can still maintai
 
 - `server/src/actions.ts` — data actions: `importSnapshot` (merge-only Plaid import), `refreshCredits` (spawns the incremental 30-day refresh), `getDashboard`, credit/posting CRUD, `updateAccount` (nickname + owner), `setTimezone`, `setOwnerLabels`.
 - `server/src/schema.ts` — accounts (incl. user-set `nickname`, Plaid `currency`), credits (incl. `anchorConfirmed`, soft-delete tombstones), postings, meta (incl. `ownerALabel` / `ownerBLabel`, `dataCoverageStart`, `excludedCredits`, `timezone`).
-- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant and Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton. Hidden by default (a stored display preference — meta `excludedCredits` — changeable in Display settings or via chat): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Global Entry, FareLock, and Instacart credits. The Marriott Brilliant property credit is not hidden but **removed**: the benefit ended in 2022, so it no longer exists in the catalog at all.
+- The built-in catalog encodes public program rules (amounts, periods, posting-name patterns, anniversary anchors) for Amex Platinum / Business Platinum / Business Gold / Hilton Aspire / Marriott Brilliant, Chase Sapphire Preferred / World of Hyatt Business / IHG One Rewards Premier / Ritz-Carlton, and U.S. Bank Altitude Reserve. Hidden by default (a stored display preference — meta `excludedCredits` — changeable in Display settings or via chat): ChatGPT Business, Indeed, Adobe, CLEAR+, Equinox, Digital Entertainment, Walmart+, Global Entry, FareLock, and Instacart credits. The Marriott Brilliant property credit is not hidden but **removed**: the benefit ended in 2022, so it no longer exists in the catalog at all.
 
 ## Tests
 
