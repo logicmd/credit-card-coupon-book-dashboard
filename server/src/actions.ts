@@ -63,7 +63,6 @@ const PERSONAL_PLAT: CreditDef[] = [
   { name: "Resy Credit", amount: 100, period: "quarterly", pattern: "resy", note: "U.S. Resy restaurants; enrollment required", enrollmentRequired: true },
   { name: "Lululemon Credit", amount: 75, period: "quarterly", pattern: "lululemon", note: "U.S. lululemon stores (excl. outlets) and online" },
   { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll and select a single qualifying airline — only that airline's incidental charges count toward the credit, and the airline selection can be changed each January" },
-  { name: "Saks Credit", amount: 50, period: "semiannual", pattern: "saks", note: "Saks Fifth Avenue purchases", enrollmentRequired: true, enrollmentNote: "Enrollment required: a one-time enrollment in the Saks credit was required before Saks purchases counted (this benefit has ended)" },
   { name: "Oura Ring Credit", amount: 200, period: "annual", pattern: "oura", note: "Oura Ring hardware only, via ouraring.com" },
   { name: "Uber One Credit", amount: 120, period: "annual", pattern: "uber one", note: "Auto-renewing Uber One membership paid with this card" },
 ];

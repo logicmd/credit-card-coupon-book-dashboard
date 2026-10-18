@@ -236,8 +236,6 @@ describe("enrollmentRequired — catalog metadata", () => {
         "The Platinum Card® :: Equinox Credit",
         "The Platinum Card® :: Digital Entertainment Credit",
         "The Platinum Card® :: Walmart+ Credit",
-        // Saks required a one-time enrollment while the benefit ran.
-        "The Platinum Card® :: Saks Credit",
       ].sort(),
     );
   });

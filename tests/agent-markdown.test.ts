@@ -148,7 +148,7 @@ function sampleDashboard(): DashboardData {
     }),
     credit({
       id: 7,
-      name: "Saks Credit",
+      name: "Discontinued Credit",
       amount: 50,
       period: "semiannual",
       currentRemaining: 50,
@@ -208,8 +208,8 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("$50 credit · $0 used · $50 remaining · available");
     expect(md).toContain("$50 credit · $20 used · $30 remaining · partially used");
     expect(md).toContain("$300 credit · $300 used · $0 remaining · used up · renews 2027-01-01");
-    // The inactive Saks credit is excluded and called out in the summary.
-    expect(md).not.toContain("Saks Credit");
+    // The inactive credit is excluded and called out in the summary.
+    expect(md).not.toContain("Discontinued Credit");
     expect(md).toContain('Not shown: 1 credit marked "stop tracking"');
   });
 
