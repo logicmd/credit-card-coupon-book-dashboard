@@ -108,7 +108,7 @@ function sampleDashboard(): DashboardData {
       daysLeft: 77,
       note: "Flights booked directly with airlines or Amex Travel",
       currentPostings: [
-        { id: 22, date: "2026-10-03", postedDate: "2026-10-03", name: "AMEX Flight Credit", amount: 20, source: "plaid" },
+        { id: 22, date: "2026-10-03", postedDate: "2026-10-03", name: "Hilton", amount: 20, source: "plaid" },
       ],
     }),
     credit({
@@ -148,7 +148,7 @@ function sampleDashboard(): DashboardData {
     }),
     credit({
       id: 7,
-      name: "Discontinued Credit",
+      name: "Saks Credit",
       amount: 50,
       period: "semiannual",
       currentRemaining: 50,
@@ -208,8 +208,8 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("$50 credit · $0 used · $50 remaining · available");
     expect(md).toContain("$50 credit · $20 used · $30 remaining · partially used");
     expect(md).toContain("$300 credit · $300 used · $0 remaining · used up · renews 2027-01-01");
-    // The inactive credit is excluded and called out in the summary.
-    expect(md).not.toContain("Discontinued Credit");
+    // The inactive Saks credit is excluded and called out in the summary.
+    expect(md).not.toContain("Saks Credit");
     expect(md).toContain('Not shown: 1 credit marked "stop tracking"');
   });
 
@@ -232,7 +232,7 @@ describe("renderAgentMarkdown", () => {
     expect(md).toContain("### Flight Credit — Sam 2222 · Hilton Honors Aspire Card");
     // Posting provenance: Plaid imports vs manual entries, and the posted
     // date is annotated when it differs from the transaction date.
-    expect(md).toContain('2026-10-03 "AMEX Flight Credit" $20 (Plaid)');
+    expect(md).toContain('2026-10-03 "Hilton" $20 (Plaid)');
     expect(md).toContain('2026-03-05 "Manual entry" $100 (manual entry)');
     expect(md).toContain('2026-09-30 "Platinum Hotel Credit" $300 (Plaid) · posted 2026-10-02');
     expect(md).toContain("- Postings this period: none yet");
@@ -303,8 +303,8 @@ describe("getAgentMarkdown action", () => {
       windowEnd: today,
       accounts: [ALEX_ASPIRE, SAM_ASPIRE],
       postings: [
-        { txnId: "fake-md-alex-flight", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: quarterStart, name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-md-sam-flight", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: quarterStart, name: "AMEX Flight Credit", amount: 20 },
+        { txnId: "fake-md-alex-flight", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: quarterStart, name: "Hilton", amount: 50 },
+        { txnId: "fake-md-sam-flight", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: quarterStart, name: "Hilton", amount: 20 },
         { txnId: "fake-md-sam-resort", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: halfStart, name: "Hilton", amount: 200 },
       ],
     } as any);

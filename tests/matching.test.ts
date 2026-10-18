@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   catalogFor,
+  isCreditPostingName,
   matchCreditForPosting,
   suspectedDuplicatesFor,
 } from "../server/src/actions";
@@ -52,6 +53,87 @@ describe("matchCreditForPosting — posting name to credit auto-mapping", () => 
     );
     expect(matchCreditForPosting(asCredits("Business Platinum Card®"), "CREDIT ADJUSTMENT")).toBeUndefined();
     expect(matchCreditForPosting(asCredits("Hilton Honors Aspire Card"), "CREDIT ADJUSTMENT")).toBeUndefined();
+  });
+});
+
+describe("matchCreditForPosting — amount-capped patterns (Aspire 'Hilton' postings)", () => {
+  // Amex posts BOTH Hilton Aspire credits with the bare name "Hilton".
+  // The Flight Credit pays at most $50 per posting, so it carries an
+  // amount cap of 50; the Resort Credit is uncapped and takes the rest.
+  const aspireCredits = () =>
+    (catalogFor("Hilton Honors Aspire Card") ?? []).map((d) => ({
+      name: d.name,
+      matchPattern: d.pattern,
+      matchAmount: d.matchAmount ?? null,
+    }));
+
+  test("a $50 'Hilton' posting goes to the Flight Credit", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Hilton", 50)?.name).toBe("Flight Credit");
+  });
+
+  test("a partial $20 'Hilton' posting still goes to the Flight Credit (under the cap)", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Hilton", 20)?.name).toBe("Flight Credit");
+  });
+
+  test("a $200 'Hilton' posting goes to the Resort Credit, never the capped Flight Credit", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Hilton", 200)?.name).toBe(
+      "Hilton Resort Credit",
+    );
+  });
+
+  test("a $150 'Hilton' posting (partial resort stay) goes to the Resort Credit", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Hilton", 150)?.name).toBe(
+      "Hilton Resort Credit",
+    );
+  });
+
+  test("a reversal (-$50) of the Flight Credit still matches it", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Hilton", -50)?.name).toBe("Flight Credit");
+  });
+
+  test("an unknown 'Hilton'-free name stays unassigned", () => {
+    expect(matchCreditForPosting(aspireCredits(), "Mystery Statement Credit", 50)).toBeUndefined();
+  });
+
+  test("without an amount, the first pattern hit wins (backward compatible)", () => {
+    const credits = [
+      { name: "Flight Credit", matchPattern: "hilton", matchAmount: 50 },
+      { name: "Hilton Resort Credit", matchPattern: "hilton", matchAmount: null },
+    ];
+    expect(matchCreditForPosting(credits, "Hilton")?.name).toBe("Flight Credit");
+  });
+
+  test("a capped credit never takes a posting above its cap, even when listed first", () => {
+    const credits = [
+      { name: "Flight Credit", matchPattern: "hilton", matchAmount: 50 },
+      { name: "Hilton Resort Credit", matchPattern: "hilton", matchAmount: null },
+    ];
+    expect(matchCreditForPosting(credits, "Hilton", 200)?.name).toBe("Hilton Resort Credit");
+    // And when nothing uncapped shares the pattern, the posting stays unassigned.
+    const onlyCapped = [{ name: "Flight Credit", matchPattern: "hilton", matchAmount: 50 }];
+    expect(matchCreditForPosting(onlyCapped, "Hilton", 200)).toBeUndefined();
+  });
+});
+
+describe("isCreditPostingName — the import keep-rule for Plaid transaction names", () => {
+  test("names containing 'credit' are kept", () => {
+    expect(isCreditPostingName("AMEX Airline Credit")).toBe(true);
+    expect(isCreditPostingName("CREDIT ADJUSTMENT")).toBe(true);
+  });
+
+  test("the bare name 'Hilton' is kept", () => {
+    expect(isCreditPostingName("Hilton")).toBe(true);
+  });
+
+  test("names containing 'reimbursement' are kept (Amex airline fee credits)", () => {
+    expect(isCreditPostingName("AMEX Airline Fee Reimbursement")).toBe(true);
+    expect(isCreditPostingName("amex airline fee reimbursement")).toBe(true);
+  });
+
+  test("ordinary purchases are not kept", () => {
+    expect(isCreditPostingName("Whole Foods Market")).toBe(false);
+    expect(isCreditPostingName("Hilton Hotels")).toBe(false);
+    expect(isCreditPostingName("Delta Air Lines")).toBe(false);
   });
 });
 

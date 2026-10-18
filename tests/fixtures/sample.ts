@@ -3,8 +3,10 @@
 // Everything in this file is invented: the people ("Alex" and "Sam"), the
 // card masks (··1111 etc.), the Plaid-style ids ("fake-..."), balances, and
 // amounts are made up. Posting names are modeled on the public Amex benefit
-// catalog (e.g. a flight-credit posting is called "AMEX Flight Credit" on
-// real statements), but no value here comes from any real account.
+// catalog (e.g. Amex posts both Hilton Aspire credits with the bare name
+// "Hilton" on real statements — the quarterly Flight Credit and the
+// semiannual Resort Credit are told apart by amount), but no value here
+// comes from any real account.
 
 export const ALEX_ASPIRE = {
   plaidAccountId: "fake-alex-aspire-1111",
@@ -135,7 +137,7 @@ export const JANUARY_SNAPSHOT = {
       txnId: "fake-txn-flight-1",
       accountPlaidId: ALEX_ASPIRE.plaidAccountId,
       date: "2026-01-10",
-      name: "AMEX Flight Credit",
+      name: "Hilton",
       amount: 50,
     },
     {

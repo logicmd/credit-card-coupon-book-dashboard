@@ -49,7 +49,7 @@ describe("importSnapshot — transaction-date attribution", () => {
           accountPlaidId: ALEX_ASPIRE.plaidAccountId,
           date: postedDate,
           ...(txnDate !== undefined ? { transactionDate: txnDate } : {}),
-          name: "AMEX Flight Credit",
+          name: "Hilton",
           amount: 50,
         },
       ],

@@ -29,6 +29,19 @@ describe("catalogFor — product detection", () => {
     ]);
   });
 
+  test("Aspire Flight Credit matches the real 'Hilton' posting name with a $50 amount cap", () => {
+    // Amex posts both Aspire credits with the bare name "Hilton" — the
+    // Flight Credit pays at most $50 per posting, so its pattern carries
+    // an amount cap; the Resort Credit is uncapped.
+    const defs = catalogFor("Hilton Honors Aspire Card")!;
+    const flight = defs.find((d) => d.name === "Flight Credit")!;
+    const resort = defs.find((d) => d.name === "Hilton Resort Credit")!;
+    expect(flight.pattern).toBe("hilton");
+    expect(flight.matchAmount).toBe(50);
+    expect(resort.pattern).toBe("hilton");
+    expect(resort.matchAmount).toBeUndefined();
+  });
+
   test("Brilliant gets the monthly dining credit", () => {
     const defs = catalogFor("Marriott Bonvoy Brilliant® American Express® Card")!;
     expect(defs[0]).toEqual(
@@ -236,6 +249,8 @@ describe("enrollmentRequired — catalog metadata", () => {
         "The Platinum Card® :: Equinox Credit",
         "The Platinum Card® :: Digital Entertainment Credit",
         "The Platinum Card® :: Walmart+ Credit",
+        // Saks required a one-time enrollment while the benefit ran.
+        "The Platinum Card® :: Saks Credit",
       ].sort(),
     );
   });

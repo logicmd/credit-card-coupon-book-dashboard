@@ -98,6 +98,13 @@ export const credits = sqliteTable("credits", {
   /** Lowercase substring matched against Plaid posting names for auto-mapping. */
   matchPattern: text("match_pattern").notNull().default(""),
   /**
+   * Optional amount cap for the match pattern (absolute dollars): when set,
+   * the pattern only auto-matches postings of at most this amount, winning
+   * over uncapped credits; postings above the cap never land on this credit.
+   * Seeded from the catalog def; see matchCreditForPosting.
+   */
+  matchAmount: real("match_amount"),
+  /**
    * The user's asserted enrollment state (1 = enrolled, 0 = not enrolled).
    * Meaningful ONLY when enrolledAsserted is 1: the app cannot observe the
    * issuer's enrollment state, so an un-asserted row is UNKNOWN — it must

@@ -22,9 +22,9 @@ async function seedTwoAspires(db: ReturnType<typeof createTestDb>) {
     windowEnd: today,
     accounts: [ALEX_ASPIRE, SAM_ASPIRE],
     postings: [
-      { txnId: "fake-d-alex-flight", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: quarterStart, name: "AMEX Flight Credit", amount: 50 },
-      { txnId: "fake-d-alex-flight-old", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: addDays(quarterStart, -10), name: "AMEX Flight Credit", amount: 50 },
-      { txnId: "fake-d-sam-flight", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: quarterStart, name: "AMEX Flight Credit", amount: 20 },
+      { txnId: "fake-d-alex-flight", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: quarterStart, name: "Hilton", amount: 50 },
+      { txnId: "fake-d-alex-flight-old", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: addDays(quarterStart, -10), name: "Hilton", amount: 50 },
+      { txnId: "fake-d-sam-flight", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: quarterStart, name: "Hilton", amount: 20 },
       { txnId: "fake-d-sam-resort", accountPlaidId: SAM_ASPIRE.plaidAccountId, date: halfStart, name: "Hilton", amount: 200 },
     ],
   } as any);

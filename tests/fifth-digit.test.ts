@@ -152,10 +152,10 @@ describe("fifth digit — disambiguation evidence on the payload", () => {
       [
         // a1: a membership-fee posting plus four credit postings.
         { txnId: "fake-fd-fee-1", accountPlaidId: "fake-fd-a1", date: "2026-03-02", name: "RENEWAL MEMBERSHIP FEE", amount: 495 },
-        { txnId: "fake-fd-p1", accountPlaidId: "fake-fd-a1", date: "2026-01-20", name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-fd-p2", accountPlaidId: "fake-fd-a1", date: "2026-04-20", name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-fd-p3", accountPlaidId: "fake-fd-a1", date: "2026-07-20", name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-fd-p4", accountPlaidId: "fake-fd-a1", date: "2026-10-05", name: "AMEX Flight Credit", amount: 50 },
+        { txnId: "fake-fd-p1", accountPlaidId: "fake-fd-a1", date: "2026-01-20", name: "Hilton", amount: 50 },
+        { txnId: "fake-fd-p2", accountPlaidId: "fake-fd-a1", date: "2026-04-20", name: "Hilton", amount: 50 },
+        { txnId: "fake-fd-p3", accountPlaidId: "fake-fd-a1", date: "2026-07-20", name: "Hilton", amount: 50 },
+        { txnId: "fake-fd-p4", accountPlaidId: "fake-fd-a1", date: "2026-10-05", name: "Hilton", amount: 50 },
         // a2: its own fee posting on a different date.
         { txnId: "fake-fd-fee-2", accountPlaidId: "fake-fd-a2", date: "2026-06-11", name: "RENEWAL MEMBERSHIP FEE", amount: 550 },
       ],

@@ -22,6 +22,18 @@ type CreditDef = {
   amount: number;
   period: Period;
   pattern: string;
+  /**
+   * Optional amount cap for the pattern: when set, the pattern only
+   * auto-matches postings of AT MOST this amount (absolute dollars). This
+   * is for issuers that post two different credits under the SAME name —
+   * e.g. Amex posts both Hilton Aspire credits with the name "Hilton":
+   * the quarterly Flight Credit pays at most $50 per posting (a $20 flight
+   * purchase credits back $20), so it carries matchAmount 50 and wins
+   * "Hilton" postings up to $50; the Resort Credit (no cap) takes the rest.
+   * Capped credits are tried before uncapped ones, and a posting above the
+   * cap never lands on the capped credit.
+   */
+  matchAmount?: number;
   note?: string;
   /**
    * True when the issuer requires enrolling in the benefit before use:
@@ -63,12 +75,18 @@ const PERSONAL_PLAT: CreditDef[] = [
   { name: "Resy Credit", amount: 100, period: "quarterly", pattern: "resy", note: "U.S. Resy restaurants; enrollment required", enrollmentRequired: true },
   { name: "Lululemon Credit", amount: 75, period: "quarterly", pattern: "lululemon", note: "U.S. lululemon stores (excl. outlets) and online" },
   { name: "Airline Fee Credit", amount: 200, period: "annual", pattern: "airline fee", note: "Incidentals on your one selected airline", enrollmentRequired: true, enrollmentNote: "Enrollment required: enroll and select a single qualifying airline — only that airline's incidental charges count toward the credit, and the airline selection can be changed each January" },
+  { name: "Saks Credit", amount: 50, period: "semiannual", pattern: "saks", note: "Saks Fifth Avenue purchases", enrollmentRequired: true, enrollmentNote: "Enrollment required: a one-time enrollment in the Saks credit was required before Saks purchases counted (this benefit has ended)" },
   { name: "Oura Ring Credit", amount: 200, period: "annual", pattern: "oura", note: "Oura Ring hardware only, via ouraring.com" },
   { name: "Uber One Credit", amount: 120, period: "annual", pattern: "uber one", note: "Auto-renewing Uber One membership paid with this card" },
 ];
 
 const ASPIRE: CreditDef[] = [
-  { name: "Flight Credit", amount: 50, period: "quarterly", pattern: "flight credit", note: "Flights booked directly with airlines or Amex Travel" },
+  // Amex posts BOTH Aspire credits with the bare name "Hilton" — the
+  // quarterly Flight Credit (at most $50 per posting) and the semiannual
+  // Resort Credit are indistinguishable by name. The $50 cap is what tells
+  // the Flight Credit apart, so it carries an amount cap (see
+  // matchCreditForPosting); the Resort Credit takes the rest.
+  { name: "Flight Credit", amount: 50, period: "quarterly", pattern: "hilton", matchAmount: 50, note: "Flights booked directly with airlines or Amex Travel" },
   // Amex runs the resort credit on a cardmember-year cycle (two 6-month
   // halves from the account anniversary), NOT calendar halves. The
   // anchor below is the same kind of placeholder default as the Chase
@@ -391,16 +409,56 @@ export function enrollmentInfoFor(
 /**
  * Auto-mapping rule for imported postings: the first of the account's
  * credits whose non-empty match pattern is a case-insensitive substring of
- * the posting name wins. Returns undefined when nothing matches (the
- * posting stays unassigned for manual review).
+ * the posting name wins — with one refinement: a credit carrying a
+ * `matchAmount` cap wins over an uncapped credit when the posting's amount
+ * is at most the cap, and is EXCLUDED when the amount exceeds it. That
+ * covers issuers that post two different credits under one name (Amex posts
+ * both Hilton Aspire credits as "Hilton": the Flight Credit, capped at $50,
+ * takes "Hilton" postings up to $50 — a $20 flight purchase credits back
+ * $20 — while the Resort Credit takes the rest; a $200 "Hilton" never lands
+ * on the Flight Credit).
+ * Returns undefined when nothing matches (the posting stays unassigned for
+ * manual review).
  */
-export function matchCreditForPosting<T extends { matchPattern: string }>(
+export function matchCreditForPosting<
+  T extends { matchPattern: string; matchAmount?: number | null },
+>(
   credits: readonly T[],
   postingName: string,
+  postingAmount?: number | null,
 ): T | undefined {
   const lower = postingName.toLowerCase();
-  return credits.find(
+  const hits = credits.filter(
     (c) => c.matchPattern !== "" && lower.includes(c.matchPattern.toLowerCase()),
+  );
+  if (postingAmount != null) {
+    const capped = hits.filter(
+      (c) => c.matchAmount != null && Math.abs(postingAmount) <= c.matchAmount + 0.005,
+    );
+    if (capped.length > 0) return capped[0];
+    // A capped credit whose cap the posting EXCEEDS is excluded: a $200
+    // "Hilton" is definitively not the $50-capped Flight Credit, so it must
+    // not fall through to it — it belongs to the uncapped credit sharing
+    // the pattern (the Resort Credit).
+    const uncapped = hits.filter((c) => c.matchAmount == null);
+    return uncapped[0];
+  }
+  return hits[0];
+}
+
+/**
+ * The import keep-rule for Plaid transaction names, shared with the refresh
+ * agent prompt: a transaction is a candidate statement-credit posting when
+ * its name contains "credit" (case-insensitive), is exactly "Hilton", or
+ * contains "reimbursement" (case-insensitive). The last clause exists
+ * because Amex posts airline fee credits as "AMEX Airline Fee
+ * Reimbursement" — containing neither "credit" nor "Hilton" — and a
+ * name-only filter would silently drop them.
+ */
+export function isCreditPostingName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    lower.includes("credit") || name === "Hilton" || lower.includes("reimbursement")
   );
 }
 
@@ -1010,6 +1068,7 @@ function synthesizedRow(inst: SynthesizedInstance): CreditRow {
     anchorConfirmed: d.anchorMonth != null ? 0 : 1,
     deleted: 0,
     matchPattern: d.pattern,
+    matchAmount: d.matchAmount ?? null,
     enrolled: d.enrollmentRequired ? 0 : 1,
     enrolledAsserted: 0,
     active: 1,
@@ -1035,6 +1094,7 @@ function defRowValues(accountId: number, d: CreditDef, sortOrder: number) {
     enrolled: d.enrollmentRequired ? 0 : 1,
     enrolledAsserted: 0,
     matchPattern: d.pattern,
+    matchAmount: d.matchAmount ?? null,
     note: d.note ?? "",
     sortOrder,
   };
@@ -1206,7 +1266,7 @@ async function computeDashboard(
         if (p.creditId != null) continue;
         const candidates = synthesizedByAccount.get(p.accountId);
         if (!candidates || candidates.length === 0) continue;
-        const match = matchCreditForPosting(candidates, p.name);
+        const match = matchCreditForPosting(candidates, p.name, p.amount);
         if (!match) continue;
         const arr = effectivePostingsByCredit.get(match.id) ?? [];
         arr.push(p);
@@ -1788,7 +1848,7 @@ export const Actions = {
         const liveCredits = (creditsByAccount.get(acct.id) ?? []).filter(
           (c) => c.deleted === 0,
         );
-        const match = matchCreditForPosting(liveCredits, p.name);
+        const match = matchCreditForPosting(liveCredits, p.name, p.amount);
         const insertedPosting = await db
           .insert(schema.postings)
           .values({
@@ -1961,7 +2021,7 @@ export const Actions = {
         "",
         "Steps:",
         "1. Run `/opt/hatch/bin/plaid accounts` and collect every account: plaidAccountId = account_id, name, mask, balance = balances.current, creditLimit = balances.limit, currency = balances.iso_currency_code. The output groups accounts by login under `institutions` — each institution entry is ONE login, but owners are PEOPLE, not logins: one person can hold several logins (e.g. their Amex login and their Chase login), and this household has up to two people. Attribute accounts to people: set owner = \"A\" for the first person and owner = \"B\" for the second, deciding from the account evidence — the cardholder names on the accounts and which products each login holds — so that ALL of one person's accounts, across every one of their logins, carry that person's key. If you cannot tell which person a login's accounts belong to, OMIT owner for those accounts entirely: the dashboard lists them under 'login not identified yet' for the user to resolve. Never guess an owner from a grouping's position in the output. (Owner is sticky in storage — the import only fills accounts that have none yet and never overwrites an existing attribution — so a careful read matters most on the first refresh.)",
-        `2. Run \`/opt/hatch/bin/plaid transactions-get --start-date ${windowStart} --end-date ${today}\` (dates are ${timezone} calendar dates). Fetch ONLY this window — ${windowReason}. Do not widen it. Keep only statement-credit postings: not pending, and the transaction name contains 'credit' (case-insensitive) or is exactly 'Hilton'. Postings run in BOTH directions: a credit the issuer PAID (Plaid amount < 0) and a REVERSAL / clawback of an earlier credit (Plaid amount > 0 under a credit name — the issuer took the credit back). Keep both. For each kept transaction produce: txnId = transaction_id, accountPlaidId = account_id, date = the transaction's posted date (its \`date\` field), transactionDate = its authorized_date — pass authorized_date as transactionDate for EVERY posting (when Plaid gives no authorized_date, set transactionDate to the posted date). Credits count toward the period of the TRANSACTION date, not the posting date; the posted date is kept for display only. name, amount = the NEGATION of Plaid's amount: positive dollars when the issuer paid a credit, NEGATIVE dollars when the issuer reversed or clawed one back. Signed amounts are how corrections are represented — the store never deletes, so a clawback must arrive as a negative posting that nets against the original credit; never drop a reversal and never flip its sign.`,
+        `2. Run \`/opt/hatch/bin/plaid transactions-get --start-date ${windowStart} --end-date ${today}\` (dates are ${timezone} calendar dates). Fetch ONLY this window — ${windowReason}. Do not widen it. Keep only statement-credit postings: not pending, and the transaction name satisfies the credit-posting rule — it contains 'credit' (case-insensitive), is exactly 'Hilton', or contains 'reimbursement' (case-insensitive). The 'reimbursement' clause matters: Amex posts airline fee credits as 'AMEX Airline Fee Reimbursement', which contains neither 'credit' nor 'Hilton' — keep those too, they are real credits. (On the Hilton Honors Aspire card, Amex posts BOTH the quarterly $50 Flight Credit and the semiannual Resort Credit with the bare name 'Hilton': keep every 'Hilton' posting — the $50 ones belong to the Flight Credit and the rest to the Resort Credit, and the import sorts them by amount.) Postings run in BOTH directions: a credit the issuer PAID (Plaid amount < 0) and a REVERSAL / clawback of an earlier credit (Plaid amount > 0 under a credit name — the issuer took the credit back). Keep both. For each kept transaction produce: txnId = transaction_id, accountPlaidId = account_id, date = the transaction's posted date (its \`date\` field), transactionDate = its authorized_date — pass authorized_date as transactionDate for EVERY posting (when Plaid gives no authorized_date, set transactionDate to the posted date). Credits count toward the period of the TRANSACTION date, not the posting date; the posted date is kept for display only. name, amount = the NEGATION of Plaid's amount: positive dollars when the issuer paid a credit, NEGATIVE dollars when the issuer reversed or clawed one back. Signed amounts are how corrections are represented — the store never deletes, so a clawback must arrive as a negative posting that nets against the original credit; never drop a reversal and never flip its sign.`,
         `3. Call this artifact's \`importSnapshot\` action with { accounts, postings, windowStart: "${windowStart}", windowEnd: "${today}", complete } exactly in that shape. Set complete to true ONLY if the Plaid accounts and transactions reads both succeeded for the entire window; if any read failed, was cut off, or returned partial data, set complete to false — the import then still merges what you read but does NOT certify the window as covered, so the next refresh retries this window instead of assuming coverage. The import is MERGE-ONLY: it inserts postings whose transaction id is new and never deletes, clears, or replaces stored data, so postings from earlier (back to ${floorStart}) that fall outside this fetched window are preserved and keep counting — do not try to re-send or 'restore' them, and never pass an empty snapshot to reset anything. (One exception: if a re-fetched posting's authorized_date differs from what was stored, the import corrects its transactionDate in place — that is expected; always send both dates exactly as Plaid reports them.) Call importSnapshot even if the window contains zero new postings (accounts plus an empty postings array, complete: true when the empty result is a successful read), so the refresh is recorded. Do not invent, rename, or round any values; copy names and amounts from the Plaid output verbatim. If Plaid reports not connected or a read fails, still call importSnapshot with whatever complete data you could read and complete: false, and say what was missing in your final message.`,
       ].join("\n");
       const res = await ctx.agent.spawnTask(message, {
@@ -2178,6 +2238,8 @@ export const Actions = {
       active: z.boolean().optional(),
       note: z.string().optional(),
       matchPattern: z.string().optional(),
+      /** Amount cap for the match pattern (absolute dollars); null clears it. */
+      matchAmount: z.number().nullable().optional(),
     }),
     response: okResponse,
     async handler(ctx, args): Promise<z.infer<typeof okResponse>> {
@@ -2227,6 +2289,7 @@ export const Actions = {
       if (args.active !== undefined) patch.active = args.active ? 1 : 0;
       if (args.note !== undefined) patch.note = args.note;
       if (args.matchPattern !== undefined) patch.matchPattern = args.matchPattern;
+      if (args.matchAmount !== undefined) patch.matchAmount = args.matchAmount;
       if (Object.keys(patch).length > 0) {
         await db.update(schema.credits).set(patch).where(eq(schema.credits.id, row.id));
         ctx.invalidateQueries();

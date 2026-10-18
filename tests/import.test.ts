@@ -34,7 +34,7 @@ describe("importSnapshot — merge-only import", () => {
       credit: p.creditId == null ? null : creditName.get(p.creditId),
     }));
     expect(mapped).toEqual([
-      { name: "AMEX Flight Credit", credit: "Flight Credit" },
+      { name: "Hilton", credit: "Flight Credit" },
       { name: "Hilton", credit: "Hilton Resort Credit" },
       { name: "AMEX Airline Fee Reimbursement", credit: "Airline Fee Credit" },
       { name: "Mystery Statement Credit", credit: null },
@@ -68,7 +68,7 @@ describe("importSnapshot — merge-only import", () => {
           txnId: "fake-txn-flight-2",
           accountPlaidId: ALEX_ASPIRE.plaidAccountId,
           date: "2026-02-10",
-          name: "AMEX Flight Credit",
+          name: "Hilton",
           amount: 50,
         },
       ],
@@ -94,7 +94,7 @@ describe("importSnapshot — merge-only import", () => {
           txnId: "fake-txn-old-1",
           accountPlaidId: ALEX_ASPIRE.plaidAccountId,
           date: "2025-07-04",
-          name: "AMEX Flight Credit",
+          name: "Hilton",
           amount: 50,
         },
       ],
@@ -133,7 +133,7 @@ describe("importSnapshot — merge-only import", () => {
           txnId: "fake-txn-ghost",
           accountPlaidId: "fake-no-such-account",
           date: "2026-01-05",
-          name: "AMEX Flight Credit",
+          name: "Hilton",
           amount: 50,
         },
       ],
@@ -251,8 +251,8 @@ describe("importSnapshot — duplicate account records are the user's decision",
       windowEnd: "2026-01-31",
       accounts: [aspire("fake-sub-primary")],
       postings: [
-        { txnId: "fake-sub-t1", accountPlaidId: "fake-sub-primary", date: "2026-01-05", name: "AMEX Flight Credit", amount: 50 },
-        { txnId: "fake-sub-t2", accountPlaidId: "fake-sub-primary", date: "2026-01-06", name: "AMEX Flight Credit", amount: 50 },
+        { txnId: "fake-sub-t1", accountPlaidId: "fake-sub-primary", date: "2026-01-05", name: "Hilton", amount: 50 },
+        { txnId: "fake-sub-t2", accountPlaidId: "fake-sub-primary", date: "2026-01-06", name: "Hilton", amount: 50 },
       ],
     } as any);
     await Actions.importSnapshot.handler(ctx, {
@@ -261,7 +261,7 @@ describe("importSnapshot — duplicate account records are the user's decision",
       windowEnd: "2026-01-31",
       accounts: [aspire("fake-sub-au", { mask: "9999", owner: "B" })],
       postings: [
-        { txnId: "fake-sub-t1", accountPlaidId: "fake-sub-au", date: "2026-01-05", name: "AMEX Flight Credit", amount: 50 },
+        { txnId: "fake-sub-t1", accountPlaidId: "fake-sub-au", date: "2026-01-05", name: "Hilton", amount: 50 },
       ],
     } as any);
 
@@ -440,7 +440,7 @@ describe("importSnapshot — signed amounts (clawbacks) and strict dates", () =>
         windowEnd: "2026-01-31",
         accounts: [ALEX_ASPIRE],
         postings: [
-          { txnId: "fake-bad-date", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: "2026-13-40", name: "AMEX Flight Credit", amount: 50 },
+          { txnId: "fake-bad-date", accountPlaidId: ALEX_ASPIRE.plaidAccountId, date: "2026-13-40", name: "Hilton", amount: 50 },
         ],
       } as any),
     ).rejects.toThrow();

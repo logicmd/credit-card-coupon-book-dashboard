@@ -122,6 +122,10 @@ describe("refreshCredits — the spawned task", () => {
     // Signed amounts: clawbacks arrive as negative postings.
     expect(captured.message).toContain("clawback");
     expect(captured.message).toContain("NEGATIVE dollars");
+    // The keep-rule also catches 'reimbursement' postings: Amex posts
+    // airline fee credits as 'AMEX Airline Fee Reimbursement', which a
+    // name filter on 'credit' alone would silently drop.
+    expect(captured.message).toContain("reimbursement");
     // Currency is collected from Plaid.
     expect(captured.message).toContain("iso_currency_code");
     // Institution-neutral copy.
